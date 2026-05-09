@@ -1,24 +1,36 @@
-//
-//  ContentView.swift
-//  Uvita
-//
-//  Created by Agnes Bijole-Himes on 5/9/26.
-//
-
 import SwiftUI
 
 struct ContentView: View {
-    var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
-    }
-}
+    @StateObject var location = LocationManager()
+    @StateObject var store    = DataStore()
+    @StateObject var tracker  = BackgroundTracker()
 
-#Preview {
-    ContentView()
+    var body: some View {
+        TabView {
+            TodayView()
+                .tabItem {
+                    Label("Today",
+                          systemImage: "sun.max")
+                }
+            InsightsView()
+                .tabItem {
+                    Label("Insights",
+                          systemImage:
+                          "chart.line.uptrend.xyaxis")
+                }
+            HistoryView()
+                .tabItem {
+                    Label("History",
+                          systemImage: "list.bullet")
+                }
+            ProfileView()
+                .tabItem {
+                    Label("Profile",
+                          systemImage: "person.circle")
+                }
+        }
+        .environmentObject(location)
+        .environmentObject(store)
+        .environmentObject(tracker)
+    }
 }
