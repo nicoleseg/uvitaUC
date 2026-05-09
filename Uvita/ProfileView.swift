@@ -15,8 +15,8 @@ struct ProfileView: View {
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 60)
-                            .onChange(of: ageText) { val in
-                                if let a = Int(val) {
+                            onChange(of: ageText) {
+                                if let a = Int(ageText) {
                                     store.profile.age = a
                                     store.saveProfile()
                                 }
@@ -39,7 +39,7 @@ struct ProfileView: View {
                             }.tag(s)
                         }
                     }
-                    .onChange(of: store.profile.skinType) { _ in
+                    .onChange(of: store.profile.skinType) {
                         store.saveProfile()
                     }
                     Text(String(format:
