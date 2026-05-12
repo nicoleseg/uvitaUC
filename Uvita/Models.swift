@@ -36,7 +36,6 @@ enum ClothingOption: String, CaseIterable, Identifiable, Codable {
     case tankShorts       = "Tank top + shorts"
     case swimwear         = "Swimwear / very minimal"
     var id: String { rawValue }
-    // Matched to bsa.py Lund-Browder chart values
     var bsaPercent: Double {
         switch self {
         case .fullyCovered:     return 2.0
@@ -49,21 +48,35 @@ enum ClothingOption: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+// Oral intake source options
+enum OralIntakeSource: String, Codable, CaseIterable {
+    case healthKit   = "Apple Health (auto)"
+    case manualLog   = "Log food in UVita"
+    case manualIU    = "Enter IU/day manually"
+    // "useEstimate" uses 5 µg/day — the population average
+    // dietary intake (~200 IU). Label and value now match.
+    case useEstimate = "Use population average (5 µg/day)"
+    case assumeZero  = "Assume 0 (no oral intake)"
+}
 
 struct UserProfile: Codable {
     var age:          Int              = 22
     var skinType:     SkinType         = .typeI_II
     var clothing:     ClothingOption   = .tshirtPants
     var oralIU:       Double           = 0.0
-    var initialLevel: Double           = 30.0  // ← changed from 50 to 30
+    var initialLevel: Double           = 30.0
     var oralSource:   OralIntakeSource = .useEstimate
-    var onboardingComplete = false
+    var onboardingComplete             = false
 
+    // Supplement-only oral µg (food log added separately
+    // in BackgroundTracker so readings carry the full total)
     var oralUg: Double {
         switch oralSource {
-        case .useEstimate: return 0.0
+        case .useEstimate: return 5.0   // 5 µg/day (~200 IU) — population average
+        case .assumeZero:  return 0.0
         case .manualIU:    return oralIU / 40.0
-        default:           return oralIU / 40.0
+        case .healthKit:   return oralIU / 40.0
+        case .manualLog:   return 0.0   // food log supplies value at log time
         }
     }
 }
@@ -71,10 +84,11 @@ struct UserProfile: Codable {
 struct VitaminDEngine {
 
     static func ageFactor(_ age: Int) -> Double {
-        1.0 - 0.013 * Double(age - 20)
+        max(0.1, 1.0 - 0.013 * Double(age - 20))
     }
 
-    static func uviToSED(uvi: Double, daylightHours: Double) -> Double {
+    static func uviToSED(uvi: Double,
+                         daylightHours: Double) -> Double {
         uvi * 0.025 * daylightHours * 3600.0 / (2.0 * 100.0)
     }
 
@@ -113,8 +127,7 @@ struct VitaminDEngine {
         uvDoses: [Double],
         bodyAreas: [Double],
         age: Int,
-        skinType: SkinType
-    ) -> [Double] {
+        skinType: SkinType) -> [Double] {
         let demo = ageFactor(age) * skinType.factor
         let N = uvDoses.count
         var result = [Double](repeating: 0.0, count: N)
@@ -135,7 +148,7 @@ struct VitaminDEngine {
         bodyAreas: [Double],
         age:       Int,
         skinType:  SkinType,
-        C0:        Double = 50.0
+        C0:        Double = 30.0
     ) -> [Double] {
         let N      = oralDoses.count
         let C_oral = computeC_oral(oralDoses)
@@ -159,9 +172,10 @@ struct VitaminDEngine {
         uvi: Double, daylightHours: Double,
         bsaPercent: Double, age: Int,
         skinType: SkinType, oralUg: Double,
-        C0: Double = 50.0
+        C0: Double = 30.0
     ) -> Double {
-        let sed = uviToSED(uvi: uvi, daylightHours: daylightHours)
+        let sed = uviToSED(uvi: uvi,
+                           daylightHours: daylightHours)
         return runModel(
             oralDoses: [oralUg],
             uvDoses:   [sed],
@@ -173,19 +187,16 @@ struct VitaminDEngine {
 
 // Per-body-part BSA breakdown from Lund-Browder chart
 struct BodyPartExposure: Codable {
-    let head:       Double  // 2%
-    let hands:      Double  // 5%
-    let forearms:   Double  // 6%
-    let upperArms:  Double  // 9%
-    let lowerLegs:  Double  // 8%
-    let upperLegs:  Double  // 11%
-    let torso:      Double  // ~18% front+back exposed in swimwear
-    // Each value is % BSA exposed for this body part
-    // given the current clothing option
+    let head:      Double
+    let hands:     Double
+    let forearms:  Double
+    let upperArms: Double
+    let lowerLegs: Double
+    let upperLegs: Double
+    let torso:     Double
 }
 
 extension ClothingOption {
-    // Exact Lund-Browder breakdown per clothing option
     var bodyPartExposure: BodyPartExposure {
         switch self {
         case .fullyCovered:
@@ -222,7 +233,6 @@ extension ClothingOption {
     }
 }
 
-// Per-body-part SED for a single reading
 struct BodyPartSED: Codable {
     let head:      Double
     let hands:     Double
@@ -232,18 +242,14 @@ struct BodyPartSED: Codable {
     let upperLegs: Double
     let torso:     Double
 
-    // Compute from a base SED and clothing option
-    static func compute(
-        baseSED: Double,
-        clothing: ClothingOption) -> BodyPartSED {
-        let bp = clothing.bodyPartExposure
-        // Each part's SED = base SED × (part BSA% / total BSA%)
+    static func compute(baseSED: Double,
+                        clothing: ClothingOption) -> BodyPartSED {
+        let bp    = clothing.bodyPartExposure
         let total = clothing.bsaPercent
         guard total > 0 else {
-            return BodyPartSED(
-                head: 0, hands: 0, forearms: 0,
-                upperArms: 0, lowerLegs: 0,
-                upperLegs: 0, torso: 0)
+            return BodyPartSED(head: 0, hands: 0, forearms: 0,
+                               upperArms: 0, lowerLegs: 0,
+                               upperLegs: 0, torso: 0)
         }
         return BodyPartSED(
             head:      baseSED * bp.head      / total,
@@ -268,7 +274,6 @@ struct BodyPartSED: Codable {
     }
 }
 
-// Update DayReading to include body part SED and food log
 struct DayReading: Codable, Identifiable {
     var id            = UUID()
     let date:          Date
@@ -278,25 +283,16 @@ struct DayReading: Codable, Identifiable {
     let bsaPercent:    Double
     let oralUg:        Double
     let plasmaLevel:   Double
-    let indoors:       Bool        // ← add
-    let bodyPartSED:   BodyPartSED // ← add
-    let clothingName:  String      // ← add for logging
+    let indoors:       Bool
+    let bodyPartSED:   BodyPartSED
+    let clothingName:  String
 }
 
-// Food log entry
 struct FoodLogEntry: Codable, Identifiable {
-    var id          = UUID()
-    let name:         String
-    let brand:        String
-    let vitaminDug:   Double
-    let servingDesc:  String
-    let date:         Date
-}
-
-// Oral intake source
-enum OralIntakeSource: String, Codable, CaseIterable {
-    case healthKit   = "Apple Health (auto)"
-    case manualLog   = "Log food in UVita"
-    case manualIU    = "Enter IU/day manually"
-    case useEstimate = "Use estimate (5 µg/day)"
+    var id         = UUID()
+    let name:        String
+    let brand:       String
+    let vitaminDug:  Double
+    let servingDesc: String
+    let date:        Date
 }

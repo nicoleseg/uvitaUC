@@ -2,56 +2,81 @@ import Foundation
 import Combine
 
 class BackgroundTracker: ObservableObject {
-    @Published var isTracking   = false
-    @Published var lastLogTime:   Date? = nil
-    @Published var todayCount:    Int   = 0
-    @Published var indoors:       Bool  = false
+    @Published var isTracking  = false
+    @Published var lastLogTime: Date? = nil
+    @Published var todayCount:  Int   = 0
+    @Published var indoors:     Bool  = false
 
-    private var timer:   Timer?
+    // How long must pass between logs (10 min)
+    private let logInterval: TimeInterval = 10 * 60
+
     private let weather = WeatherService()
-    private let intervalMinutes: Double = 5  // ← changed to 5
 
-    func start(location: LocationManager,
-               store: DataStore) {
-        timer?.invalidate()
-        timer = nil
-        isTracking = true
-        UserDefaults.standard.set(
-            true, forKey: "uvita_tracking")
-        Task { await log(location: location,
-                         store: store) }
-        timer = Timer.scheduledTimer(
-            withTimeInterval: intervalMinutes * 60,
-            repeats: true
-        ) { [weak self] _ in
-            Task {
-                await self?.log(
-                    location: location,
-                    store: store)
-            }
-        }
-        RunLoop.main.add(timer!, forMode: .common)
-    }
-
-    func stop() {
-        timer?.invalidate()
-        timer      = nil
-        isTracking = false
-        UserDefaults.standard.set(
-            false, forKey: "uvita_tracking")
-    }
-
+    // Called from TodayView.onAppear — resumes if was
+    // tracking before app was killed
     func autoResume(location: LocationManager,
                     store: DataStore) {
         let was = UserDefaults.standard
             .bool(forKey: "uvita_tracking")
         if was { start(location: location, store: store) }
     }
-    
-    // Add to BackgroundTracker — forces an immediate log
-    // regardless of time since last log
+
+    func start(location: LocationManager,
+               store: DataStore) {
+        isTracking = true
+        UserDefaults.standard.set(
+            true, forKey: "uvita_tracking")
+
+        // Wire CoreLocation callback — fires whenever
+        // CoreLocation delivers a new position (50m move
+        // or app foreground). logIfDue() gates actual
+        // network calls to once per logInterval.
+        location.onLocationUpdate = { [weak self] in
+            Task { @MainActor in
+                await self?.logIfDue(
+                    location: location, store: store)
+            }
+        }
+
+        // Log immediately on start so user sees data
+        Task { @MainActor in
+            await logIfDue(
+                location: location,
+                store: store,
+                force: true)
+        }
+    }
+
+    func stop() {
+        isTracking = false
+        UserDefaults.standard.set(
+            false, forKey: "uvita_tracking")
+        // Nil out the callback so location events
+        // no longer trigger logging
+        // (LocationManager keeps running for GPS display)
+    }
+
+    // Force an immediate log — used when clothing changes
     func logNow(location: LocationManager,
                 store: DataStore) async {
+        await log(location: location, store: store)
+    }
+
+    // Gate: only call log() if enough time has passed
+    @MainActor
+    private func logIfDue(location: LocationManager,
+                          store: DataStore,
+                          force: Bool = false) async {
+        guard isTracking else { return }
+        guard location.ready else { return }
+
+        let now = Date()
+        if !force {
+            if let last = lastLogTime,
+               now.timeIntervalSince(last) < logInterval {
+                return
+            }
+        }
         await log(location: location, store: store)
     }
 
@@ -67,12 +92,16 @@ class BackgroundTracker: ObservableObject {
 
             indoors = w.indoors
 
-            let profile    = store.profile
-            let sed        = VitaminDEngine.uviToSED(
+            let profile = store.profile
+
+            // Combine supplement + food log for oral intake
+            let oralUg = profile.oralUg
+                + store.todayOralUgFromFoodLog()
+
+            let sed = VitaminDEngine.uviToSED(
                 uvi:           w.uvi,
                 daylightHours: w.daylightHours)
 
-            // Compute per-body-part SED
             let bodyPartSED = BodyPartSED.compute(
                 baseSED:  sed,
                 clothing: profile.clothing)
@@ -83,7 +112,7 @@ class BackgroundTracker: ObservableObject {
                 bsaPercent:    profile.clothing.bsaPercent,
                 age:           profile.age,
                 skinType:      profile.skinType,
-                oralUg:        profile.oralUg,
+                oralUg:        oralUg,
                 C0:            profile.initialLevel)
 
             let reading = DayReading(
@@ -92,15 +121,13 @@ class BackgroundTracker: ObservableObject {
                 daylightHours: w.daylightHours,
                 sed:           sed,
                 bsaPercent:    profile.clothing.bsaPercent,
-                oralUg:        profile.oralUg,
+                oralUg:        oralUg,
                 plasmaLevel:   plasma,
                 indoors:       w.indoors,
                 bodyPartSED:   bodyPartSED,
                 clothingName:  profile.clothing.rawValue)
 
             store.addReading(reading)
-
-            // Write files to On My iPhone/Uvita/
             FileLogger.log(reading: reading)
 
             lastLogTime = Date()

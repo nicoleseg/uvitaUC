@@ -11,19 +11,24 @@ class LocationManager: NSObject, ObservableObject,
     @Published var ready    = false
     @Published var statusMessage = "Waiting for GPS..."
 
-    // Callback fired every time location updates
-    // BackgroundTracker hooks into this
+    // BackgroundTracker assigns this to trigger logIfDue()
+    // whenever CoreLocation delivers a fresh position.
+    // Using CoreLocation as the wake source (not a Timer)
+    // means iOS keeps delivering events even when the app
+    // has been in the background for a long time, because
+    // significant-location-change / 50m distanceFilter
+    // wakes the process reliably.
     var onLocationUpdate: (() -> Void)?
 
     override init() {
         super.init()
-        mgr.delegate = self
-        mgr.desiredAccuracy =
-            kCLLocationAccuracyHundredMeters
+        mgr.delegate                        = self
+        mgr.desiredAccuracy                 = kCLLocationAccuracyHundredMeters
         mgr.allowsBackgroundLocationUpdates = true
         mgr.pausesLocationUpdatesAutomatically = false
-        // distanceFilter: only wake app if moved 50m+
-        // This prevents constant wakeups while sitting still
+        // Only wake for meaningful moves — prevents
+        // spurious indoor/outdoor flips from GPS drift
+        // while the device is stationary
         mgr.distanceFilter = 50
         mgr.requestAlwaysAuthorization()
         mgr.startUpdatingLocation()
@@ -33,6 +38,7 @@ class LocationManager: NSObject, ObservableObject,
         _ manager: CLLocationManager,
         didUpdateLocations locs: [CLLocation]) {
         guard let loc = locs.last else { return }
+
         latitude  = loc.coordinate.latitude
         longitude = loc.coordinate.longitude
         accuracy  = loc.horizontalAccuracy
@@ -41,8 +47,9 @@ class LocationManager: NSObject, ObservableObject,
             format: "GPS ready — %.3f, %.3f (±%.0fm)",
             latitude, longitude, accuracy)
 
-        // Fire callback — BackgroundTracker
-        // decides whether enough time has passed to log
+        // Fire — BackgroundTracker's logIfDue() decides
+        // whether enough time has passed to actually log.
+        // This is the only place onLocationUpdate is called.
         onLocationUpdate?()
     }
 
