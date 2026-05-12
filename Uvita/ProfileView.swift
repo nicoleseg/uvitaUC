@@ -11,19 +11,11 @@ struct ProfileView: View {
                     HStack {
                         Text("Age")
                         Spacer()
-<<<<<<< HEAD
-                        TextField("22", text: $ageText)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 60)
-                            onChange(of: ageText) {
-=======
                         TextField("21", text: $ageText)
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 60)
                             .onChange(of: ageText) {
->>>>>>> a566aef (Fix onboarding, insights redesign, dropdown history, tracking behavior, and profile updates)
                                 if let a = Int(ageText) {
                                     store.profile.age = a
                                     store.saveProfile()
