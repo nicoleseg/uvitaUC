@@ -13,7 +13,8 @@ class BackgroundTracker: ObservableObject {
 
     func start(location: LocationManager,
                store: DataStore) {
-        guard !isTracking else { return }
+        timer?.invalidate()
+        timer = nil
         isTracking = true
         UserDefaults.standard.set(
             true, forKey: "uvita_tracking")

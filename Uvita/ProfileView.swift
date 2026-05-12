@@ -11,11 +11,19 @@ struct ProfileView: View {
                     HStack {
                         Text("Age")
                         Spacer()
+<<<<<<< HEAD
                         TextField("22", text: $ageText)
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 60)
                             onChange(of: ageText) {
+=======
+                        TextField("21", text: $ageText)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 60)
+                            .onChange(of: ageText) {
+>>>>>>> a566aef (Fix onboarding, insights redesign, dropdown history, tracking behavior, and profile updates)
                                 if let a = Int(ageText) {
                                     store.profile.age = a
                                     store.saveProfile()
@@ -84,17 +92,6 @@ struct ProfileView: View {
                         store.saveProfile()
                     }
                     .foregroundColor(.orange)
-                }
-
-                Section("Model constants (Table I, Diffey 2013)") {
-                    row("f  tissue fraction",    "0.15")
-                    row("β  plasma half-life",   "25 days")
-                    row("γ  tissue half-life",   "250 days")
-                    row("α  UV uptake",          "0.6 days")
-                    row("α′ oral uptake",        "1.5 days")
-                    row("A  UV scaling",
-                        "0.18 nmol/L·SED⁻¹·%⁻¹")
-                    row("S  oral scaling",       "0.023 nmol/L·µg⁻¹")
                 }
 
                 Section("Data") {

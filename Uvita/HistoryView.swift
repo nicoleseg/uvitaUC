@@ -16,31 +16,75 @@ struct HistoryView: View {
     var history: [(Date, Double)] {
         store.plasmaHistory(days: daysToShow)
     }
+    
+    var longitudinalData: [(label: String,
+                            total: Double,
+                            uvContrib: Double,
+                            oralContrib: Double)] {
+        let cal   = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        var dayMap: [Date: DayReading] = [:]
+        for r in store.readings {
+            let day = cal.startOfDay(for: r.date)
+            dayMap[day] = r
+        }
+        guard let cutoff = cal.date(
+            byAdding: .day,
+            value: -(daysToShow - 1),
+            to: today) else { return [] }
+        let sorted = dayMap
+            .filter { $0.key >= cutoff }
+            .sorted { $0.key < $1.key }
+        guard !sorted.isEmpty else { return [] }
+
+        let uvDoses   = sorted.map { $0.value.sed }
+        let bsas      = sorted.map { $0.value.bsaPercent }
+        let oralDoses = sorted.map { $0.value.oralUg }
+        let n         = sorted.count
+
+        let totals = VitaminDEngine.runModel(
+            oralDoses: oralDoses, uvDoses: uvDoses,
+            bodyAreas: bsas,
+            age: store.profile.age,
+            skinType: store.profile.skinType,
+            C0: store.profile.initialLevel)
+
+        let uvOnly = VitaminDEngine.runModel(
+            oralDoses: Array(repeating: 0, count: n),
+            uvDoses: uvDoses, bodyAreas: bsas,
+            age: store.profile.age,
+            skinType: store.profile.skinType,
+            C0: store.profile.initialLevel)
+
+        let oralOnly = VitaminDEngine.runModel(
+            oralDoses: oralDoses,
+            uvDoses: Array(repeating: 0, count: n),
+            bodyAreas: bsas,
+            age: store.profile.age,
+            skinType: store.profile.skinType,
+            C0: store.profile.initialLevel)
+
+        return sorted.enumerated().map { i, pair in
+            let fmt = DateFormatter()
+            fmt.dateFormat = "M/d"
+            return (
+                label: fmt.string(from: pair.key),
+                total: totals[i],
+                uvContrib: max(0, uvOnly[i] -
+                    store.profile.initialLevel),
+                oralContrib: max(0, oralOnly[i] -
+                    store.profile.initialLevel))
+        }
+    }
 
     var body: some View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 14) {
 
-                    Picker("Range",
-                           selection: $selectedRange) {
-                        ForEach(0..<ranges.count,
-                                id: \.self) {
-                            Text(ranges[$0]).tag($0)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
 
                     if !history.isEmpty {
                         HStack(spacing: 10) {
-                            SummaryCard(
-                                label: "Latest",
-                                value: String(format: "%.0f",
-                                    history.last?.1 ?? 0),
-                                unit:  "nmol/L",
-                                color: levelColor(
-                                    history.last?.1 ?? 0))
                             SummaryCard(
                                 label: "Average",
                                 value: String(format: "%.0f",
@@ -57,114 +101,196 @@ struct HistoryView: View {
                         }
                         .padding(.horizontal)
                     }
+                    if !longitudinalData.isEmpty {
 
-                    if !history.isEmpty {
                         VStack(alignment: .leading,
-                               spacing: 8) {
-                            Text("Plasma 25(OH)D over time")
+                               spacing: 0) {
+
+                            Text("All readings")
                                 .font(.headline)
-                                .padding(.horizontal)
-                            PlasmaChart(data: history)
-                                .frame(height: 200)
-                                .padding(.horizontal)
-                        }
-                        .padding(.vertical)
-                        .background(Color(
-                            .secondarySystemBackground))
-                        .cornerRadius(16)
-                        .padding(.horizontal)
-                    } else {
-                        Text("No data yet — keep tracking to see your trend.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding()
-                    }
+                                .padding()
+                            HStack {
+                                Text("Date")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 40,
+                                           alignment: .leading)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Today")
-                            .font(.headline)
+                                Spacer()
+                                Text("UV contrib")
+                                    .font(.caption2)
+                                    .foregroundColor(.orange)
+                                Spacer()
+                                Text("Oral contrib")
+                                    .font(.caption2)
+                                    .foregroundColor(.blue)
+                                Spacer()
+                                Text("C_total")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 70,
+                                           alignment: .trailing)
+                            }
                             .padding(.horizontal)
-                        HStack(spacing: 10) {
-                            SummaryCard(
-                                label: "Readings",
-                                value: "\(store.todayReadings.count)",
-                                unit:  "logged",
-                                color: .teal)
-                            SummaryCard(
-                                label: "Total SED",
-                                value: String(format: "%.3f",
-                                    store.todaySED()),
-                                unit:  "UV dose",
-                                color: .orange)
-                            SummaryCard(
-                                label: "Avg 25(OH)D",
-                                value: String(format: "%.0f",
-                                    store.todayAvgPlasma()),
-                                unit:  "nmol/L",
-                                color: levelColor(
-                                    store.todayAvgPlasma()))
-                        }
-                        .padding(.horizontal)
-                    }
-                    .padding(.vertical)
-                    .background(Color(
-                        .secondarySystemBackground))
-                    .cornerRadius(16)
-                    .padding(.horizontal)
-
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("All readings")
-                            .font(.headline).padding()
-                        if store.readings.isEmpty {
-                            Text("No readings yet — start tracking on the Today tab.")
-                                .foregroundColor(.secondary)
-                                .font(.caption).padding()
-                        } else {
+                            .padding(.bottom, 8)
                             ForEach(
-                                store.readings.sorted {
-                                    $0.date > $1.date
-                                }) { r in
-                                HStack {
-                                    VStack(
-                                        alignment: .leading,
-                                        spacing: 3) {
-                                        Text(r.date.formatted(
-                                            .dateTime
-                                            .month().day()
-                                            .hour().minute()))
-                                            .font(.caption)
-                                            .foregroundColor(
-                                                .secondary)
-                                        Text(String(format:
-                                            "UVI %.1f · BSA %.0f%% · SED %.4f",
-                                            r.uvi,
-                                            r.bsaPercent,
-                                            r.sed))
+                                longitudinalData.indices,
+                                id: \.self
+                            ) { i in
+
+                                let day = longitudinalData[i]
+
+                                let cal = Calendar.current
+
+                                let matchingReadings =
+                                    store.readings
+                                        .filter {
+                                            cal.isDate(
+                                                $0.date,
+                                                inSameDayAs:
+                                                    dateFromLabel(day.label)
+                                            )
+                                        }
+                                        .sorted {
+                                            $0.date > $1.date
+                                        }
+
+                                DisclosureGroup {
+
+                                    VStack(spacing: 0) {
+
+                                        ForEach(matchingReadings) { r in
+
+                                            HStack {
+
+                                                VStack(
+                                                    alignment: .leading,
+                                                    spacing: 3
+                                                ) {
+
+                                                    Text(
+                                                        r.date.formatted(
+                                                            .dateTime
+                                                                .month()
+                                                                .day()
+                                                                .hour()
+                                                                .minute()
+                                                        )
+                                                    )
+                                                    .font(.caption)
+                                                    .foregroundColor(
+                                                        .secondary
+                                                    )
+
+                                                    Text(
+                                                        String(
+                                                            format:
+                                                            "UVI %.1f · BSA %.0f%% · SED %.4f",
+                                                            r.uvi,
+                                                            r.bsaPercent,
+                                                            r.sed
+                                                        )
+                                                    )
+                                                    .font(.caption2)
+                                                    .foregroundColor(
+                                                        .secondary
+                                                    )
+                                                }
+
+                                                Spacer()
+
+                                                Text(
+                                                    String(
+                                                        format:
+                                                        "%.0f nmol/L",
+                                                        r.plasmaLevel
+                                                    )
+                                                )
+                                                .font(.subheadline)
+                                                .fontWeight(.semibold)
+                                                .foregroundColor(
+                                                    levelColor(
+                                                        r.plasmaLevel
+                                                    )
+                                                )
+                                            }
+                                            .padding(.horizontal)
+                                            .padding(.vertical, 8)
+
+                                            Divider()
+                                                .padding(.horizontal)
+                                        }
+                                    }
+
+                                } label: {
+
+                                    HStack {
+
+                                        Text(day.label)
                                             .font(.caption2)
                                             .foregroundColor(
-                                                .secondary)
+                                                .secondary
+                                            )
+                                            .frame(
+                                                width: 40,
+                                                alignment: .leading
+                                            )
+
+                                        Spacer()
+
+                                        Text(
+                                            String(
+                                                format:
+                                                "+%.2f",
+                                                day.uvContrib
+                                            )
+                                        )
+                                        .font(.caption2)
+                                        .foregroundColor(.orange)
+
+                                        Spacer()
+
+                                        Text(
+                                            String(
+                                                format:
+                                                "+%.2f",
+                                                day.oralContrib
+                                            )
+                                        )
+                                        .font(.caption2)
+                                        .foregroundColor(.blue)
+
+                                        Spacer()
+
+                                        Text(
+                                            String(
+                                                format:
+                                                "%.0f",
+                                                day.total
+                                            )
+                                        )
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                        .frame(
+                                            width: 70,
+                                            alignment: .trailing
+                                        )
                                     }
-                                    Spacer()
-                                    Text(String(format:
-                                        "%.0f nmol/L",
-                                        r.plasmaLevel))
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(
-                                            levelColor(
-                                                r.plasmaLevel))
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 10)
                                 }
-                                .padding(.horizontal)
-                                .padding(.vertical, 8)
+
                                 Divider()
                                     .padding(.horizontal)
                             }
                         }
+                        .background(
+                            Color(.secondarySystemBackground)
+                        )
+                        .cornerRadius(16)
+                        .padding(.horizontal)
                     }
-                    .background(Color(
-                        .secondarySystemBackground))
-                    .cornerRadius(16)
-                    .padding(.horizontal)
+                    
                 }
                 .padding(.vertical)
             }
@@ -180,7 +306,34 @@ struct HistoryView: View {
             }
         }
     }
+    
+    func dateFromLabel(_ label: String) -> Date {
 
+        let fmt = DateFormatter()
+        fmt.dateFormat = "M/d"
+
+        let parsed =
+            fmt.date(from: label) ?? Date()
+
+        let currentYear =
+            Calendar.current.component(
+                .year,
+                from: Date()
+            )
+
+        var comps =
+            Calendar.current.dateComponents(
+                [.month, .day],
+                from: parsed
+            )
+
+        comps.year = currentYear
+
+        return Calendar.current.date(
+            from: comps
+        ) ?? Date()
+    }
+    
     func levelColor(_ v: Double) -> Color {
         v < 30 ? .red : v < 50 ? .orange : .green
     }

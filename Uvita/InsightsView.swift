@@ -192,91 +192,117 @@ struct InsightsView: View {
                             .padding(.horizontal)
                         }
 
-                        // Chart 2: Stacked bar
                         if !longitudinalData.isEmpty {
-                            VStack(alignment: .leading,
-                                   spacing: 8) {
-                                Text("Vitamin D by Source")
-                                    .font(.headline)
-                                    .padding(.horizontal)
-                                Text("UV synthesis vs oral intake")
+
+                            HStack(alignment: .top,
+                                   spacing: 20) {
+
+                                // LEFT: stacked contribution bar
+                                VStack(alignment: .leading,
+                                       spacing: 8) {
+
+                                    Text("Vitamin D by Source")
+                                        .font(.headline)
+
+                                    Text(
+                                        "Cumulative modeled contribution over selected window"
+                                    )
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
-                                    .padding(.horizontal)
-                                ContributionBar(
-                                    uvContrib:   totalUV,
-                                    oralContrib: totalOral,
-                                    baseline:
-                                        store.profile.initialLevel,
-                                    total: totalCombined)
-                                    .frame(height: 150)
-                                    .padding(.horizontal)
-                            }
-                            .padding(.vertical)
-                            .background(Color(
-                                .secondarySystemBackground))
-                            .cornerRadius(16)
-                            .padding(.horizontal)
-                        }
 
-                        // Percentage breakdown
-                        if !longitudinalData.isEmpty {
-                            VStack(alignment: .leading,
-                                   spacing: 10) {
-                                Text("Contribution Breakdown")
-                                    .font(.headline)
-                                let netGain = max(0.01,
-                                    totalUV + totalOral)
-                                let uvPct =
-                                    totalUV / netGain * 100
-                                let orPct =
-                                    totalOral / netGain * 100
-                                HStack(spacing: 10) {
-                                    ContribCard(
-                                        label: "UV synthesis",
-                                        value: String(
-                                            format: "%.1f%%",
-                                            uvPct),
-                                        sub: String(
-                                            format: "+%.2f nmol/L",
-                                            totalUV),
-                                        color: .orange)
-                                    ContribCard(
-                                        label: "Oral intake",
-                                        value: String(
-                                            format: "%.1f%%",
-                                            orPct),
-                                        sub: String(
-                                            format: "+%.2f nmol/L",
-                                            totalOral),
-                                        color: .blue)
+                                    ContributionBar(
+                                        uvContrib: totalUV,
+                                        oralContrib: totalOral,
+                                        baseline: store.profile.initialLevel,
+                                        total: totalCombined
+                                    )
+                                    .frame(width: 110, height: 100)
+                                    .padding(.leading, 65)
                                 }
+                                .frame(maxWidth: .infinity)
+                                .background(
+                                    Color(.secondarySystemBackground)
+                                )
+                                .cornerRadius(16)
+
+                                // RIGHT: percentage breakdown
                                 VStack(alignment: .leading,
-                                       spacing: 4) {
-                                    Text("vs prior UVita study")
-                                        .font(.caption)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(.secondary)
-                                    Text("Paper found UV = 73-98% across 3 participants over 6 days.")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                    Text(uvPct > 60
-                                         ? "Matches paper — UV dominant"
-                                         : "UV lower than expected — possibly indoors often")
+                                       spacing: 8) {
+
+                                    Text("Contribution Breakdown")
+                                        .font(.headline)
+
+                                    let netGain = max(
+                                        0.01,
+                                        totalUV + totalOral
+                                    )
+
+                                    let uvPct =
+                                        totalUV / netGain * 100
+
+                                    let orPct =
+                                        totalOral / netGain * 100
+
+                                    HStack(spacing: 10) {
+
+                                        ContribCard(
+                                            label: "UV synthesis",
+                                            value: String(
+                                                format: "%.1f%%",
+                                                uvPct
+                                            ),
+                                            sub: String(
+                                                format: "+%.2f nmol/L",
+                                                totalUV
+                                            ),
+                                            color: .orange
+                                        )
+                                        .scaleEffect(0.88)
+
+                                        ContribCard(
+                                            label: "Oral intake",
+                                            value: String(
+                                                format: "%.1f%%",
+                                                orPct
+                                            ),
+                                            sub: String(
+                                                format: "+%.2f nmol/L",
+                                                totalOral
+                                            ),
+                                            color: .blue
+                                        )
+                                        .scaleEffect(0.88)
+                                    }
+
+                                    VStack(alignment: .leading,
+                                           spacing: 4) {
+
+                                        Text(
+                                            uvPct > 60
+                                            ? "Matches paper — UV dominant"
+                                            : "UV lower than expected — possibly indoors often"
+                                        )
                                         .font(.caption2)
                                         .foregroundColor(
                                             uvPct > 60
-                                            ? .green : .orange)
+                                            ? .green
+                                            : .orange
+                                        )
+                                    }
+                                    .padding(10)
+                                    .background(
+                                        Color(.tertiarySystemBackground)
+                                    )
+                                    .cornerRadius(10)
                                 }
-                                .padding(10)
-                                .background(Color(
-                                    .tertiarySystemBackground))
-                                .cornerRadius(10)
+                                .frame(maxWidth: .infinity,
+                                       alignment: .topLeading)
+                                .padding()
+                                .background(
+                                    Color(.secondarySystemBackground)
+                                )
+                                .cornerRadius(16)
                             }
-                            .padding()
-                            .background(Color(
-                                .secondarySystemBackground))
-                            .cornerRadius(16)
                             .padding(.horizontal)
                         }
 
@@ -469,80 +495,6 @@ struct InsightsView: View {
                             .secondarySystemBackground))
                         .cornerRadius(16)
                         .padding(.horizontal)
-
-                        // Day-by-day table
-                        if !longitudinalData.isEmpty {
-                            VStack(alignment: .leading,
-                                   spacing: 0) {
-                                Text("Day-by-day model output")
-                                    .font(.headline).padding()
-                                HStack {
-                                    Text("Day")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                        .frame(width: 40,
-                                               alignment: .leading)
-                                    Spacer()
-                                    Text("UV contrib")
-                                        .font(.caption2)
-                                        .foregroundColor(.orange)
-                                    Spacer()
-                                    Text("Oral contrib")
-                                        .font(.caption2)
-                                        .foregroundColor(.blue)
-                                    Spacer()
-                                    Text("C_total")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                        .frame(width: 70,
-                                               alignment: .trailing)
-                                }
-                                .padding(.horizontal)
-                                .padding(.bottom, 4)
-                                Divider()
-                                ForEach(
-                                    longitudinalData.indices,
-                                    id: \.self) { i in
-                                    let d = longitudinalData[i]
-                                    HStack {
-                                        Text(d.label)
-                                            .font(.caption)
-                                            .frame(width: 40,
-                                                   alignment: .leading)
-                                        Spacer()
-                                        Text(String(format:
-                                            "+%.3f", d.uvContrib))
-                                            .font(.caption)
-                                            .foregroundColor(.orange)
-                                        Spacer()
-                                        Text(String(format:
-                                            "+%.3f", d.oralContrib))
-                                            .font(.caption)
-                                            .foregroundColor(.blue)
-                                        Spacer()
-                                        Text(String(format:
-                                            "%.1f", d.total))
-                                            .font(.caption)
-                                            .fontWeight(.semibold)
-                                            .foregroundColor(
-                                                d.total < 30
-                                                ? .red
-                                                : d.total < 50
-                                                ? .orange : .green)
-                                            .frame(width: 70,
-                                                   alignment: .trailing)
-                                    }
-                                    .padding(.horizontal)
-                                    .padding(.vertical, 6)
-                                    Divider()
-                                        .padding(.horizontal)
-                                }
-                            }
-                            .background(Color(
-                                .secondarySystemBackground))
-                            .cornerRadius(16)
-                            .padding(.horizontal)
-                        }
 
                     } // end if !readings.isEmpty
                 }
@@ -760,7 +712,6 @@ struct ContribCard: View {
         .cornerRadius(12)
     }
 }
-
 
 // ── 90-day projection chart ───────────────────────────────────
 struct ProjectionChart: View {

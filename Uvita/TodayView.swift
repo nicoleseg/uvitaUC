@@ -252,38 +252,64 @@ struct TodayLogCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Today's readings")
-                .font(.headline).padding(.horizontal)
             if store.todayReadings.isEmpty {
                 Text("No readings yet — tap Start above")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.horizontal)
             } else {
-                ForEach(store.todayReadings
-                    .sorted { $0.date > $1.date }) { r in
-                    HStack {
-                        VStack(alignment: .leading,
-                               spacing: 2) {
-                            Text(r.date.formatted(
-                                .dateTime.hour().minute()))
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                            Text(String(format:
-                                "UVI %.1f · BSA %.0f%% · SED %.4f",
-                                r.uvi,
-                                r.bsaPercent,
-                                r.sed))
+                DisclosureGroup {
+                    VStack(spacing: 0) {
+                        ForEach(
+                            store.todayReadings
+                                .sorted { $0.date > $1.date }
+                        ) { r in
+                            HStack {
+                                VStack(alignment: .leading,
+                                       spacing: 2) {
+                                    Text(
+                                        r.date.formatted(
+                                            .dateTime.hour().minute()
+                                        )
+                                    )
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    Text(
+                                        String(format:
+                                            "UVI %.1f · BSA %.0f%% · SED %.4f",
+                                            r.uvi,
+                                            r.bsaPercent,
+                                            r.sed)
+                                    )
+                                    .font(.caption)
+                                }
+                                Spacer()
+                                Text(
+                                    String(format:
+                                        "%.0f nmol/L",
+                                        r.plasmaLevel)
+                                )
                                 .font(.caption)
+                                .fontWeight(.semibold)
+                            }
+                            .padding(.horizontal)
+                            .padding(.vertical, 8)
+
+                            Divider()
+                                .padding(.horizontal)
                         }
+                    }
+
+                } label: {
+                    HStack {
+                        Text("Today's readings")
+                            .font(.headline)
                         Spacer()
-                        Text(String(format: "%.0f nmol/L",
-                                    r.plasmaLevel))
+                        Text("\(store.todayReadings.count)")
                             .font(.caption)
-                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
                     }
                     .padding(.horizontal)
-                    Divider().padding(.horizontal)
                 }
             }
         }

@@ -61,7 +61,7 @@ struct UserProfile: Codable {
 
     var oralUg: Double {
         switch oralSource {
-        case .useEstimate: return 5.0
+        case .useEstimate: return 0.0
         case .manualIU:    return oralIU / 40.0
         default:           return oralIU / 40.0
         }
