@@ -54,6 +54,13 @@ class DataStore: ObservableObject {
             .decode([DayReading].self, from: d) {
             readings = r
         }
+        if let d = UserDefaults.standard.data(forKey: foodLogKey),
+           let f = try? JSONDecoder().decode(
+                [FoodLogEntry].self,
+                from: d
+           ) {
+            foodLog = f
+        }
     }
 
     var todayReadings: [DayReading] {
@@ -141,5 +148,62 @@ class DataStore: ObservableObject {
             guard level > 0 else { return nil }
             return (date, level)
         }.reversed()
+    }
+    // Add these
+    @Published var foodLog: [FoodLogEntry] = []
+    private let foodLogKey = "uvita_foodlog_v1"
+
+
+
+    func addFoodLog(_ entry: FoodLogEntry) {
+        foodLog.append(entry)
+        saveFoodLog()
+        FileLogger.logDiet(entry)  // ← write to Files app
+    }
+
+    func removeFoodLog(_ entry: FoodLogEntry) {
+        foodLog.removeAll { $0.id == entry.id }
+        saveFoodLog()
+    }
+
+    private func saveFoodLog() {
+        if let d = try? JSONEncoder().encode(foodLog) {
+            UserDefaults.standard.set(d, forKey: foodLogKey)
+        }
+    }
+
+    var todayFoodLog: [FoodLogEntry] {
+        foodLog.filter {
+            Calendar.current.isDateInToday($0.date)
+        }
+    }
+
+    func todayOralUgFromFoodLog() -> Double {
+        todayFoodLog.reduce(0) { $0 + $1.vitaminDug }
+    }
+
+    // Cumulative body part SED across all readings
+    func cumulativeBodyPartSED() -> [String: Double] {
+        var totals: [String: Double] = [
+            "Head": 0, "Hands": 0, "Forearms": 0,
+            "Upper Arms": 0, "Lower Legs": 0,
+            "Upper Legs": 0, "Torso": 0
+        ]
+        for r in readings where !r.indoors {
+            totals["Head",     default: 0] += r.bodyPartSED.head
+            totals["Hands",    default: 0] += r.bodyPartSED.hands
+            totals["Forearms", default: 0] += r.bodyPartSED.forearms
+            totals["Upper Arms",default:0] += r.bodyPartSED.upperArms
+            totals["Lower Legs",default:0] += r.bodyPartSED.lowerLegs
+            totals["Upper Legs",default:0] += r.bodyPartSED.upperLegs
+            totals["Torso",    default: 0] += r.bodyPartSED.torso
+        }
+        return totals
+    }
+
+    var mostExposedBodyPart: (String, Double) {
+        cumulativeBodyPartSED()
+            .max(by: { $0.value < $1.value })
+            ?? ("None", 0)
     }
 }

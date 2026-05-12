@@ -49,24 +49,23 @@ enum ClothingOption: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-struct DayReading: Codable, Identifiable {
-    var id        = UUID()
-    let date:          Date
-    let uvi:           Double
-    let daylightHours: Double
-    let sed:           Double
-    let bsaPercent:    Double
-    let oralUg:        Double
-    let plasmaLevel:   Double
-}
 
 struct UserProfile: Codable {
-    var age:          Int            = 22
-    var skinType:     SkinType       = .typeI_II
-    var clothing:     ClothingOption = .tshirtPants
-    var oralIU:       Double         = 0.0
-    var initialLevel: Double         = 50.0
-    var oralUg: Double { oralIU / 40.0 }
+    var age:          Int              = 22
+    var skinType:     SkinType         = .typeI_II
+    var clothing:     ClothingOption   = .tshirtPants
+    var oralIU:       Double           = 0.0
+    var initialLevel: Double           = 30.0  // ← changed from 50 to 30
+    var oralSource:   OralIntakeSource = .useEstimate
+    var onboardingComplete = false
+
+    var oralUg: Double {
+        switch oralSource {
+        case .useEstimate: return 5.0
+        case .manualIU:    return oralIU / 40.0
+        default:           return oralIU / 40.0
+        }
+    }
 }
 
 struct VitaminDEngine {
@@ -170,4 +169,134 @@ struct VitaminDEngine {
             age: age, skinType: skinType, C0: C0
         ).first ?? C0
     }
+}
+
+// Per-body-part BSA breakdown from Lund-Browder chart
+struct BodyPartExposure: Codable {
+    let head:       Double  // 2%
+    let hands:      Double  // 5%
+    let forearms:   Double  // 6%
+    let upperArms:  Double  // 9%
+    let lowerLegs:  Double  // 8%
+    let upperLegs:  Double  // 11%
+    let torso:      Double  // ~18% front+back exposed in swimwear
+    // Each value is % BSA exposed for this body part
+    // given the current clothing option
+}
+
+extension ClothingOption {
+    // Exact Lund-Browder breakdown per clothing option
+    var bodyPartExposure: BodyPartExposure {
+        switch self {
+        case .fullyCovered:
+            return BodyPartExposure(
+                head: 2, hands: 0, forearms: 0,
+                upperArms: 0, lowerLegs: 0,
+                upperLegs: 0, torso: 0)
+        case .longSleevesPants:
+            return BodyPartExposure(
+                head: 2, hands: 5, forearms: 0,
+                upperArms: 0, lowerLegs: 0,
+                upperLegs: 0, torso: 0)
+        case .tshirtPants:
+            return BodyPartExposure(
+                head: 2, hands: 5, forearms: 6,
+                upperArms: 0, lowerLegs: 0,
+                upperLegs: 0, torso: 0)
+        case .tshirtShorts:
+            return BodyPartExposure(
+                head: 2, hands: 5, forearms: 6,
+                upperArms: 9, lowerLegs: 8,
+                upperLegs: 0, torso: 0)
+        case .tankShorts:
+            return BodyPartExposure(
+                head: 2, hands: 5, forearms: 6,
+                upperArms: 9, lowerLegs: 8,
+                upperLegs: 3, torso: 4)
+        case .swimwear:
+            return BodyPartExposure(
+                head: 2, hands: 5, forearms: 6,
+                upperArms: 9, lowerLegs: 8,
+                upperLegs: 11, torso: 18)
+        }
+    }
+}
+
+// Per-body-part SED for a single reading
+struct BodyPartSED: Codable {
+    let head:      Double
+    let hands:     Double
+    let forearms:  Double
+    let upperArms: Double
+    let lowerLegs: Double
+    let upperLegs: Double
+    let torso:     Double
+
+    // Compute from a base SED and clothing option
+    static func compute(
+        baseSED: Double,
+        clothing: ClothingOption) -> BodyPartSED {
+        let bp = clothing.bodyPartExposure
+        // Each part's SED = base SED × (part BSA% / total BSA%)
+        let total = clothing.bsaPercent
+        guard total > 0 else {
+            return BodyPartSED(
+                head: 0, hands: 0, forearms: 0,
+                upperArms: 0, lowerLegs: 0,
+                upperLegs: 0, torso: 0)
+        }
+        return BodyPartSED(
+            head:      baseSED * bp.head      / total,
+            hands:     baseSED * bp.hands     / total,
+            forearms:  baseSED * bp.forearms  / total,
+            upperArms: baseSED * bp.upperArms / total,
+            lowerLegs: baseSED * bp.lowerLegs / total,
+            upperLegs: baseSED * bp.upperLegs / total,
+            torso:     baseSED * bp.torso     / total)
+    }
+
+    var asDictionary: [String: Double] {
+        ["Head": head, "Hands": hands,
+         "Forearms": forearms, "Upper Arms": upperArms,
+         "Lower Legs": lowerLegs, "Upper Legs": upperLegs,
+         "Torso": torso]
+    }
+
+    var mostExposed: (String, Double) {
+        asDictionary.max(by: { $0.value < $1.value })
+            ?? ("None", 0)
+    }
+}
+
+// Update DayReading to include body part SED and food log
+struct DayReading: Codable, Identifiable {
+    var id            = UUID()
+    let date:          Date
+    let uvi:           Double
+    let daylightHours: Double
+    let sed:           Double
+    let bsaPercent:    Double
+    let oralUg:        Double
+    let plasmaLevel:   Double
+    let indoors:       Bool        // ← add
+    let bodyPartSED:   BodyPartSED // ← add
+    let clothingName:  String      // ← add for logging
+}
+
+// Food log entry
+struct FoodLogEntry: Codable, Identifiable {
+    var id          = UUID()
+    let name:         String
+    let brand:        String
+    let vitaminDug:   Double
+    let servingDesc:  String
+    let date:         Date
+}
+
+// Oral intake source
+enum OralIntakeSource: String, Codable, CaseIterable {
+    case healthKit   = "Apple Health (auto)"
+    case manualLog   = "Log food in UVita"
+    case manualIU    = "Enter IU/day manually"
+    case useEstimate = "Use estimate (5 µg/day)"
 }

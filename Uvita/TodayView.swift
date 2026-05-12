@@ -293,54 +293,7 @@ struct TodayLogCard: View {
     }
 }
 
-// ── Clothing picker ───────────────────────────────────────────
-struct ClothingCard: View {
-    @EnvironmentObject var store: DataStore
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("What are you wearing?")
-                    .font(.headline)
-                Text("Sets BSA A(t) — Lund-Browder chart")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            ForEach(ClothingOption.allCases,
-                    id: \.rawValue) {
-                (opt: ClothingOption) in
-                Button {
-                    store.profile.clothing = opt
-                    store.saveProfile()
-                } label: {
-                    HStack {
-                        Text(opt.rawValue)
-                            .foregroundColor(.primary)
-                            .multilineTextAlignment(.leading)
-                        Spacer()
-                        Text("BSA \(Int(opt.bsaPercent))%")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        if store.profile.clothing == opt {
-                            Image(systemName:
-                                "checkmark.circle.fill")
-                                .foregroundColor(.blue)
-                        }
-                    }
-                    .padding(10)
-                    .background(
-                        store.profile.clothing == opt
-                        ? Color.blue.opacity(0.08)
-                        : Color(.tertiarySystemBackground))
-                    .cornerRadius(10)
-                }
-            }
-        }
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(16).padding(.horizontal)
-    }
-}
 
 // ── Supplement ────────────────────────────────────────────────
 struct SupplementCard: View {
@@ -382,5 +335,79 @@ struct SupplementCard: View {
             iuText = store.profile.oralIU == 0
                 ? "" : String(Int(store.profile.oralIU))
         }
+    }
+}
+
+struct ClothingCard: View {
+
+    @EnvironmentObject var store: DataStore
+    @EnvironmentObject var tracker: BackgroundTracker
+    @EnvironmentObject var location: LocationManager
+
+    var body: some View {
+
+        VStack(alignment: .leading, spacing: 10) {
+
+            VStack(alignment: .leading, spacing: 2) {
+
+                Text("What are you wearing?")
+                    .font(.headline)
+
+                Text("Sets exposed body surface area")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            ForEach(
+                ClothingOption.allCases,
+                id: \.rawValue
+            ) { opt in
+
+                Button {
+
+                    store.profile.clothing = opt
+                    store.saveProfile()
+
+                    Task {
+                        await tracker.logNow(
+                            location: location,
+                            store: store
+                        )
+                    }
+
+                } label: {
+
+                    HStack {
+
+                        Text(opt.rawValue)
+                            .foregroundColor(.primary)
+
+                        Spacer()
+
+                        Text("BSA \(Int(opt.bsaPercent))%")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        if store.profile.clothing == opt {
+
+                            Image(systemName:
+                                    "checkmark.circle.fill")
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    .padding(10)
+                    .background(
+                        store.profile.clothing == opt
+                        ? Color.blue.opacity(0.08)
+                        : Color(.tertiarySystemBackground)
+                    )
+                    .cornerRadius(10)
+                }
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(16)
+        .padding(.horizontal)
     }
 }

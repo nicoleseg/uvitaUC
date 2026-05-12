@@ -49,17 +49,41 @@ struct ProfileView: View {
                         .foregroundColor(.secondary)
                 }
 
-                Section("Baseline") {
+                Section("Baseline assumption") {
                     HStack {
-                        Text("Starting 25(OH)D")
+                        Text("Starting 25(OH)D (C₀)")
                         Spacer()
-                        Text(String(format: "%.0f nmol/L",
-                            store.profile.initialLevel))
+                        TextField("30",
+                            value: $store.profile.initialLevel,
+                            format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 60)
+                            .textFieldStyle(.roundedBorder)
+                            .onChange(of: store.profile.initialLevel) {
+                                store.saveProfile()
+                            }
+                        Text("nmol/L")
                             .foregroundColor(.secondary)
                     }
-                    Text("Assumed 50 nmol/L per your paper since no serum data available.")
+                    Text(store.profile.initialLevel < 30
+                         ? "Deficient starting point — model will show recovery trajectory."
+                         : store.profile.initialLevel < 50
+                         ? "Insufficient starting point."
+                         : "Sufficient starting point — enter your actual blood test result for accuracy.")
                         .font(.caption)
+                        .foregroundColor(
+                            store.profile.initialLevel < 30 ? .red
+                            : store.profile.initialLevel < 50 ? .orange
+                            : .green)
+                    Text("Default 30 nmol/L = deficiency threshold. Enter your actual serum result from a blood test for a personalized projection.")
+                        .font(.caption2)
                         .foregroundColor(.secondary)
+                    Button("Reset to 30 nmol/L (default)") {
+                        store.profile.initialLevel = 30
+                        store.saveProfile()
+                    }
+                    .foregroundColor(.orange)
                 }
 
                 Section("Model constants (Table I, Diffey 2013)") {

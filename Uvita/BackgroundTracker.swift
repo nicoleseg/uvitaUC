@@ -9,7 +9,7 @@ class BackgroundTracker: ObservableObject {
 
     private var timer:   Timer?
     private let weather = WeatherService()
-    private let intervalMinutes: Double = 10
+    private let intervalMinutes: Double = 5  // ← changed to 5
 
     func start(location: LocationManager,
                store: DataStore) {
@@ -17,10 +17,8 @@ class BackgroundTracker: ObservableObject {
         isTracking = true
         UserDefaults.standard.set(
             true, forKey: "uvita_tracking")
-        Task {
-            await log(location: location,
-                      store: store)
-        }
+        Task { await log(location: location,
+                         store: store) }
         timer = Timer.scheduledTimer(
             withTimeInterval: intervalMinutes * 60,
             repeats: true
@@ -46,9 +44,14 @@ class BackgroundTracker: ObservableObject {
                     store: DataStore) {
         let was = UserDefaults.standard
             .bool(forKey: "uvita_tracking")
-        if was {
-            start(location: location, store: store)
-        }
+        if was { start(location: location, store: store) }
+    }
+    
+    // Add to BackgroundTracker — forces an immediate log
+    // regardless of time since last log
+    func logNow(location: LocationManager,
+                store: DataStore) async {
+        await log(location: location, store: store)
     }
 
     @MainActor
@@ -63,30 +66,41 @@ class BackgroundTracker: ObservableObject {
 
             indoors = w.indoors
 
-            let profile = store.profile
-            let sed     = VitaminDEngine.uviToSED(
+            let profile    = store.profile
+            let sed        = VitaminDEngine.uviToSED(
                 uvi:           w.uvi,
                 daylightHours: w.daylightHours)
-            let plasma  =
-                VitaminDEngine.singleDayEstimate(
-                    uvi:           w.uvi,
-                    daylightHours: w.daylightHours,
-                    bsaPercent:
-                        profile.clothing.bsaPercent,
-                    age:           profile.age,
-                    skinType:      profile.skinType,
-                    oralUg:        profile.oralUg,
-                    C0:            profile.initialLevel)
 
-            store.addReading(DayReading(
+            // Compute per-body-part SED
+            let bodyPartSED = BodyPartSED.compute(
+                baseSED:  sed,
+                clothing: profile.clothing)
+
+            let plasma = VitaminDEngine.singleDayEstimate(
+                uvi:           w.uvi,
+                daylightHours: w.daylightHours,
+                bsaPercent:    profile.clothing.bsaPercent,
+                age:           profile.age,
+                skinType:      profile.skinType,
+                oralUg:        profile.oralUg,
+                C0:            profile.initialLevel)
+
+            let reading = DayReading(
                 date:          Date(),
                 uvi:           w.uvi,
                 daylightHours: w.daylightHours,
                 sed:           sed,
-                bsaPercent:
-                    profile.clothing.bsaPercent,
+                bsaPercent:    profile.clothing.bsaPercent,
                 oralUg:        profile.oralUg,
-                plasmaLevel:   plasma))
+                plasmaLevel:   plasma,
+                indoors:       w.indoors,
+                bodyPartSED:   bodyPartSED,
+                clothingName:  profile.clothing.rawValue)
+
+            store.addReading(reading)
+
+            // Write files to On My iPhone/Uvita/
+            FileLogger.log(reading: reading)
 
             lastLogTime = Date()
             todayCount  = store.todayReadings.count

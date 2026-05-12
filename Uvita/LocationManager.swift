@@ -4,11 +4,16 @@ import Combine
 class LocationManager: NSObject, ObservableObject,
                        CLLocationManagerDelegate {
     private let mgr = CLLocationManager()
+
     @Published var latitude:  Double = 0
     @Published var longitude: Double = 0
     @Published var accuracy:  Double = 10
     @Published var ready    = false
     @Published var statusMessage = "Waiting for GPS..."
+
+    // Callback fired every time location updates
+    // BackgroundTracker hooks into this
+    var onLocationUpdate: (() -> Void)?
 
     override init() {
         super.init()
@@ -17,6 +22,9 @@ class LocationManager: NSObject, ObservableObject,
             kCLLocationAccuracyHundredMeters
         mgr.allowsBackgroundLocationUpdates = true
         mgr.pausesLocationUpdatesAutomatically = false
+        // distanceFilter: only wake app if moved 50m+
+        // This prevents constant wakeups while sitting still
+        mgr.distanceFilter = 50
         mgr.requestAlwaysAuthorization()
         mgr.startUpdatingLocation()
     }
@@ -32,6 +40,10 @@ class LocationManager: NSObject, ObservableObject,
         statusMessage = String(
             format: "GPS ready — %.3f, %.3f (±%.0fm)",
             latitude, longitude, accuracy)
+
+        // Fire callback — BackgroundTracker
+        // decides whether enough time has passed to log
+        onLocationUpdate?()
     }
 
     func locationManager(

@@ -280,6 +280,11 @@ struct InsightsView: View {
                             .padding(.horizontal)
                         }
 
+                        // ── Body part SED card ─────────────────
+                        
+                        BodyPartSEDCard()
+                        
+
                         // 90-day projection
                         VStack(alignment: .leading,
                                spacing: 10) {
@@ -755,6 +760,7 @@ struct ContribCard: View {
         .cornerRadius(12)
     }
 }
+
 
 // ── 90-day projection chart ───────────────────────────────────
 struct ProjectionChart: View {
