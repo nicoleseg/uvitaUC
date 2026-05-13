@@ -2,15 +2,17 @@ import Foundation
 import Combine
 
 class DataStore: ObservableObject {
-    @Published var profile  = UserProfile()
-    @Published var readings: [DayReading] = []
-    @Published var foodLog:  [FoodLogEntry] = []
+    @Published var profile:  UserProfile     = UserProfile()
+    @Published var readings: [DayReading]    = []
+    @Published var foodLog:  [FoodLogEntry]  = []
 
     private let profileKey  = "uvita_profile_v2"
     private let readingsKey = "uvita_readings_v2"
     private let foodLogKey  = "uvita_foodlog_v1"
 
     init() { load() }
+
+    // ── Write ────────────────────────────────────────────────
 
     func saveProfile() {
         if let d = try? JSONEncoder().encode(profile) {
@@ -46,7 +48,7 @@ class DataStore: ObservableObject {
         saveReadings()
     }
 
-    // ── Derived values ────────────────────────────────────────
+    // ── Today helpers ────────────────────────────────────────
 
     var todayReadings: [DayReading] {
         readings.filter { Calendar.current.isDateInToday($0.date) }
@@ -56,36 +58,84 @@ class DataStore: ObservableObject {
         foodLog.filter { Calendar.current.isDateInToday($0.date) }
     }
 
-    // Sum of vitamin D from food log entries logged today
-    func todayOralUgFromFoodLog() -> Double {
-        todayFoodLog.reduce(0) { $0 + $1.vitaminDug }
-    }
-
+    // Sum of all per-reading SEDs logged today — this is
+    // today's accumulated E(t) for display purposes.
     func todaySED() -> Double {
         todayReadings.reduce(0) { $0 + $1.sed }
     }
 
-    func todayAvgPlasma() -> Double {
-        guard !todayReadings.isEmpty else { return profile.initialLevel }
-        return todayReadings.map { $0.plasmaLevel }.reduce(0, +)
-            / Double(todayReadings.count)
+    // Daily oral intake resolved from the active source.
+    // Food log entries are only counted if oralSource == .manualLog.
+    // This ensures only one source is active at a time — if the
+    // user switches back and forth during the day, only the
+    // currently chosen source counts.
+    func dailyOralUg() -> Double {
+        switch profile.oralSource {
+        case .manualLog:
+            // Sum only food log entries for today
+            return todayFoodLog.reduce(0) { $0 + $1.vitaminDug }
+        default:
+            // All other sources (useEstimate=5µg, manualIU, healthKit, assumeZero)
+            // return a fixed daily value from the profile
+            return profile.supplementOralUg
+        }
     }
 
-    // ── Full longitudinal model ───────────────────────────────
+    // Food log total for today (for display only — not for
+    // the model unless oralSource == .manualLog)
+    func todayOralUgFromFoodLog() -> Double {
+        todayFoodLog.reduce(0) { $0 + $1.vitaminDug }
+    }
 
-    func currentPlasmaLevel() -> Double {
-        guard !readings.isEmpty else { return profile.initialLevel }
-        let cal = Calendar.current
-        var dayMap: [Date: DayReading] = [:]
+    // ── Diffey model — one entry per calendar day ────────────
+    //
+    // IMPORTANT: runModel() takes daily aggregates, not
+    // per-reading values. Each day's entry is:
+    //   uvDose   = sum of all reading.sed for that day
+    //   oralDose = that day's oral intake (one value per day)
+    //   bodyArea = most common (last) BSA% for the day
+    //
+    // This matches Eq. 8 where T indexes calendar days.
+
+    private struct DayAggregate {
+        let date:     Date
+        let uvDose:   Double   // sum of per-reading SEDs
+        let oralDose: Double   // daily oral µg
+        let bsa:      Double   // last clothing BSA%
+    }
+
+    private func buildDayAggregates(
+        upTo endDate: Date? = nil) -> [DayAggregate] {
+        let cal  = Calendar.current
+        var dayMap: [Date: [DayReading]] = [:]
         for r in readings {
             let day = cal.startOfDay(for: r.date)
-            dayMap[day] = r
+            if let end = endDate, r.date > end { continue }
+            dayMap[day, default: []].append(r)
         }
-        let sorted = dayMap.values.sorted { $0.date < $1.date }
+        return dayMap
+            .sorted { $0.key < $1.key }
+            .map { day, rds in
+                // UV dose = sum of all per-reading SEDs for the day
+                let uvDose = rds.reduce(0) { $0 + $1.sed }
+                // Oral dose = last reading's snapshot (daily value)
+                let oral   = rds.sorted { $0.date < $1.date }
+                                .last?.oralUg ?? profile.supplementOralUg
+                // BSA = last clothing setting of the day
+                let bsa    = rds.sorted { $0.date < $1.date }
+                                .last?.bsaPercent ?? profile.clothing.bsaPercent
+                return DayAggregate(date: day, uvDose: uvDose,
+                                    oralDose: oral, bsa: bsa)
+            }
+    }
+
+    func currentPlasmaLevel() -> Double {
+        let aggs = buildDayAggregates()
+        guard !aggs.isEmpty else { return profile.initialLevel }
         let result = VitaminDEngine.runModel(
-            oralDoses: sorted.map { $0.oralUg },
-            uvDoses:   sorted.map { $0.sed },
-            bodyAreas: sorted.map { $0.bsaPercent },
+            oralDoses: aggs.map { $0.oralDose },
+            uvDoses:   aggs.map { $0.uvDose },
+            bodyAreas: aggs.map { $0.bsa },
             age:       profile.age,
             skinType:  profile.skinType,
             C0:        profile.initialLevel)
@@ -94,23 +144,14 @@ class DataStore: ObservableObject {
 
     func plasmaForDay(_ date: Date) -> Double {
         let cal = Calendar.current
-        let dayReadings = readings.filter {
-            cal.isDate($0.date, inSameDayAs: date)
-        }.sorted { $0.date < $1.date }
-        guard !dayReadings.isEmpty else { return 0 }
-
-        var dayMap: [Date: DayReading] = [:]
-        for r in readings {
-            let day = cal.startOfDay(for: r.date)
-            if r.date <= dayReadings.last!.date {
-                dayMap[day] = r
-            }
-        }
-        let sorted = dayMap.values.sorted { $0.date < $1.date }
+        let end = cal.date(bySettingHour: 23, minute: 59,
+                           second: 59, of: date) ?? date
+        let aggs = buildDayAggregates(upTo: end)
+        guard !aggs.isEmpty else { return 0 }
         let result = VitaminDEngine.runModel(
-            oralDoses: sorted.map { $0.oralUg },
-            uvDoses:   sorted.map { $0.sed },
-            bodyAreas: sorted.map { $0.bsaPercent },
+            oralDoses: aggs.map { $0.oralDose },
+            uvDoses:   aggs.map { $0.uvDose },
+            bodyAreas: aggs.map { $0.bsa },
             age:       profile.age,
             skinType:  profile.skinType,
             C0:        profile.initialLevel)
@@ -130,7 +171,62 @@ class DataStore: ObservableObject {
         }.reversed()
     }
 
-    // ── Body part SED ─────────────────────────────────────────
+    // For InsightsView longitudinal chart — returns per-day
+    // model output with UV/oral split, one entry per day.
+    struct DayModelResult {
+        let date:        Date
+        let label:       String
+        let total:       Double
+        let uvContrib:   Double
+        let oralContrib: Double
+    }
+
+    func longitudinalModel(daysBack: Int) -> [DayModelResult] {
+        let cal   = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        guard let cutoff = cal.date(
+            byAdding: .day, value: -(daysBack - 1), to: today)
+        else { return [] }
+
+        let aggs = buildDayAggregates()
+            .filter { $0.date >= cutoff }
+        guard !aggs.isEmpty else { return [] }
+
+        let n = aggs.count
+        let totals = VitaminDEngine.runModel(
+            oralDoses: aggs.map { $0.oralDose },
+            uvDoses:   aggs.map { $0.uvDose },
+            bodyAreas: aggs.map { $0.bsa },
+            age: profile.age, skinType: profile.skinType,
+            C0: profile.initialLevel)
+
+        let uvOnly = VitaminDEngine.runModel(
+            oralDoses: Array(repeating: 0, count: n),
+            uvDoses:   aggs.map { $0.uvDose },
+            bodyAreas: aggs.map { $0.bsa },
+            age: profile.age, skinType: profile.skinType,
+            C0: profile.initialLevel)
+
+        let oralOnly = VitaminDEngine.runModel(
+            oralDoses: aggs.map { $0.oralDose },
+            uvDoses:   Array(repeating: 0, count: n),
+            bodyAreas: aggs.map { $0.bsa },
+            age: profile.age, skinType: profile.skinType,
+            C0: profile.initialLevel)
+
+        let fmt = DateFormatter()
+        fmt.dateFormat = "M/d"
+        return aggs.enumerated().map { i, agg in
+            DayModelResult(
+                date:        agg.date,
+                label:       fmt.string(from: agg.date),
+                total:       totals[i],
+                uvContrib:   max(0, uvOnly[i]   - profile.initialLevel),
+                oralContrib: max(0, oralOnly[i] - profile.initialLevel))
+        }
+    }
+
+    // ── Body part SED ────────────────────────────────────────
 
     func cumulativeBodyPartSED() -> [String: Double] {
         var totals: [String: Double] = [
@@ -152,11 +248,10 @@ class DataStore: ObservableObject {
 
     var mostExposedBodyPart: (String, Double) {
         cumulativeBodyPartSED()
-            .max(by: { $0.value < $1.value })
-            ?? ("None", 0)
+            .max(by: { $0.value < $1.value }) ?? ("None", 0)
     }
 
-    // ── Persistence ───────────────────────────────────────────
+    // ── Persistence ──────────────────────────────────────────
 
     private func saveReadings() {
         if let d = try? JSONEncoder().encode(readings) {
@@ -172,16 +267,13 @@ class DataStore: ObservableObject {
 
     private func load() {
         if let d = UserDefaults.standard.data(forKey: profileKey),
-           let p = try? JSONDecoder().decode(UserProfile.self, from: d) {
-            profile = p
-        }
+           let p = try? JSONDecoder().decode(
+                UserProfile.self, from: d) { profile = p }
         if let d = UserDefaults.standard.data(forKey: readingsKey),
-           let r = try? JSONDecoder().decode([DayReading].self, from: d) {
-            readings = r
-        }
+           let r = try? JSONDecoder().decode(
+                [DayReading].self, from: d) { readings = r }
         if let d = UserDefaults.standard.data(forKey: foodLogKey),
-           let f = try? JSONDecoder().decode([FoodLogEntry].self, from: d) {
-            foodLog = f
-        }
+           let f = try? JSONDecoder().decode(
+                [FoodLogEntry].self, from: d) { foodLog = f }
     }
 }

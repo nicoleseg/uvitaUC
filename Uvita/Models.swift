@@ -48,35 +48,33 @@ enum ClothingOption: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-// Oral intake source options
 enum OralIntakeSource: String, Codable, CaseIterable {
     case healthKit   = "Apple Health (auto)"
     case manualLog   = "Log food in UVita"
     case manualIU    = "Enter IU/day manually"
-    // "useEstimate" uses 5 µg/day — the population average
-    // dietary intake (~200 IU). Label and value now match.
     case useEstimate = "Use population average (5 µg/day)"
     case assumeZero  = "Assume 0 (no oral intake)"
 }
 
 struct UserProfile: Codable {
-    var age:          Int              = 22
-    var skinType:     SkinType         = .typeI_II
-    var clothing:     ClothingOption   = .tshirtPants
-    var oralIU:       Double           = 0.0
-    var initialLevel: Double           = 30.0
-    var oralSource:   OralIntakeSource = .useEstimate
-    var onboardingComplete             = false
+    var age:               Int              = 22
+    var skinType:          SkinType         = .typeI_II
+    var clothing:          ClothingOption   = .tshirtPants
+    var oralIU:            Double           = 0.0
+    var initialLevel:      Double           = 30.0
+    var oralSource:        OralIntakeSource = .useEstimate
+    var onboardingComplete                  = false
 
-    // Supplement-only oral µg (food log added separately
-    // in BackgroundTracker so readings carry the full total)
-    var oralUg: Double {
+    // Daily oral µg from supplement / estimate.
+    // Food log entries are tracked separately in DataStore
+    // and resolved at the day level in dailyOralUg().
+    var supplementOralUg: Double {
         switch oralSource {
-        case .useEstimate: return 5.0   // 5 µg/day (~200 IU) — population average
+        case .useEstimate: return 5.0    // ~200 IU/day population average
         case .assumeZero:  return 0.0
         case .manualIU:    return oralIU / 40.0
         case .healthKit:   return oralIU / 40.0
-        case .manualLog:   return 0.0   // food log supplies value at log time
+        case .manualLog:   return 0.0    // food log supplies the value
         }
     }
 }
@@ -87,9 +85,18 @@ struct VitaminDEngine {
         max(0.1, 1.0 - 0.013 * Double(age - 20))
     }
 
+    // Eq. 2 — SED for a single time-slice of duration
+    // `intervalHours`. Each reading represents the UV dose
+    // accumulated during its sampling interval, NOT the
+    // whole day. Summing all readings in a day gives the
+    // correct daily E(t) for the Diffey model.
+    //
+    // E_reading = UVI × 0.025 × intervalHours × 3600 / (2 × 100)
+    //
+    // For a fixed 5-min logger: intervalHours = 5/60 = 0.0833
     static func uviToSED(uvi: Double,
-                         daylightHours: Double) -> Double {
-        uvi * 0.025 * daylightHours * 3600.0 / (2.0 * 100.0)
+                         intervalHours: Double) -> Double {
+        uvi * 0.025 * intervalHours * 3600.0 / (2.0 * 100.0)
     }
 
     static func R_UV(_ t: Double) -> Double {
@@ -123,11 +130,10 @@ struct VitaminDEngine {
         return result
     }
 
-    static func computeC_sun(
-        uvDoses: [Double],
-        bodyAreas: [Double],
-        age: Int,
-        skinType: SkinType) -> [Double] {
+    static func computeC_sun(uvDoses: [Double],
+                              bodyAreas: [Double],
+                              age: Int,
+                              skinType: SkinType) -> [Double] {
         let demo = ageFactor(age) * skinType.factor
         let N = uvDoses.count
         var result = [Double](repeating: 0.0, count: N)
@@ -142,19 +148,21 @@ struct VitaminDEngine {
         return result
     }
 
-    static func runModel(
-        oralDoses: [Double],
-        uvDoses:   [Double],
-        bodyAreas: [Double],
-        age:       Int,
-        skinType:  SkinType,
-        C0:        Double = 30.0
-    ) -> [Double] {
+    // runModel expects ONE entry per CALENDAR DAY.
+    // Each entry's uvDose is the sum of all per-reading SEDs
+    // for that day. oralDose is the day's total oral intake.
+    // bodyArea is the day's representative BSA %.
+    static func runModel(oralDoses: [Double],
+                         uvDoses:   [Double],
+                         bodyAreas: [Double],
+                         age:       Int,
+                         skinType:  SkinType,
+                         C0:        Double = 30.0) -> [Double] {
         let N      = oralDoses.count
         let C_oral = computeC_oral(oralDoses)
-        let C_sun  = computeC_sun(
-            uvDoses: uvDoses, bodyAreas: bodyAreas,
-            age: age, skinType: skinType)
+        let C_sun  = computeC_sun(uvDoses: uvDoses,
+                                   bodyAreas: bodyAreas,
+                                   age: age, skinType: skinType)
         var C_total = [Double](repeating: 0.0, count: N)
         for T in 0..<N {
             let C_prev      = T == 0 ? C0  : C_total[T-1]
@@ -166,22 +174,6 @@ struct VitaminDEngine {
                 + F * (C_sun[T] - C_sun_prev)
         }
         return C_total
-    }
-
-    static func singleDayEstimate(
-        uvi: Double, daylightHours: Double,
-        bsaPercent: Double, age: Int,
-        skinType: SkinType, oralUg: Double,
-        C0: Double = 30.0
-    ) -> Double {
-        let sed = uviToSED(uvi: uvi,
-                           daylightHours: daylightHours)
-        return runModel(
-            oralDoses: [oralUg],
-            uvDoses:   [sed],
-            bodyAreas: [bsaPercent],
-            age: age, skinType: skinType, C0: C0
-        ).first ?? C0
     }
 }
 
@@ -200,35 +192,29 @@ extension ClothingOption {
     var bodyPartExposure: BodyPartExposure {
         switch self {
         case .fullyCovered:
-            return BodyPartExposure(
-                head: 2, hands: 0, forearms: 0,
-                upperArms: 0, lowerLegs: 0,
-                upperLegs: 0, torso: 0)
+            return BodyPartExposure(head: 2, hands: 0, forearms: 0,
+                                    upperArms: 0, lowerLegs: 0,
+                                    upperLegs: 0, torso: 0)
         case .longSleevesPants:
-            return BodyPartExposure(
-                head: 2, hands: 5, forearms: 0,
-                upperArms: 0, lowerLegs: 0,
-                upperLegs: 0, torso: 0)
+            return BodyPartExposure(head: 2, hands: 5, forearms: 0,
+                                    upperArms: 0, lowerLegs: 0,
+                                    upperLegs: 0, torso: 0)
         case .tshirtPants:
-            return BodyPartExposure(
-                head: 2, hands: 5, forearms: 6,
-                upperArms: 0, lowerLegs: 0,
-                upperLegs: 0, torso: 0)
+            return BodyPartExposure(head: 2, hands: 5, forearms: 6,
+                                    upperArms: 0, lowerLegs: 0,
+                                    upperLegs: 0, torso: 0)
         case .tshirtShorts:
-            return BodyPartExposure(
-                head: 2, hands: 5, forearms: 6,
-                upperArms: 9, lowerLegs: 8,
-                upperLegs: 0, torso: 0)
+            return BodyPartExposure(head: 2, hands: 5, forearms: 6,
+                                    upperArms: 9, lowerLegs: 8,
+                                    upperLegs: 0, torso: 0)
         case .tankShorts:
-            return BodyPartExposure(
-                head: 2, hands: 5, forearms: 6,
-                upperArms: 9, lowerLegs: 8,
-                upperLegs: 3, torso: 4)
+            return BodyPartExposure(head: 2, hands: 5, forearms: 6,
+                                    upperArms: 9, lowerLegs: 8,
+                                    upperLegs: 3, torso: 4)
         case .swimwear:
-            return BodyPartExposure(
-                head: 2, hands: 5, forearms: 6,
-                upperArms: 9, lowerLegs: 8,
-                upperLegs: 11, torso: 18)
+            return BodyPartExposure(head: 2, hands: 5, forearms: 6,
+                                    upperArms: 9, lowerLegs: 8,
+                                    upperLegs: 11, torso: 18)
         }
     }
 }
@@ -269,20 +255,23 @@ struct BodyPartSED: Codable {
     }
 
     var mostExposed: (String, Double) {
-        asDictionary.max(by: { $0.value < $1.value })
-            ?? ("None", 0)
+        asDictionary.max(by: { $0.value < $1.value }) ?? ("None", 0)
     }
 }
 
+// A single logged reading — one per 5-min interval.
+// sed here is the per-reading SED (small number).
+// The Diffey model receives DAILY aggregates from DataStore,
+// not individual readings.
 struct DayReading: Codable, Identifiable {
     var id            = UUID()
     let date:          Date
     let uvi:           Double
-    let daylightHours: Double
-    let sed:           Double
+    let intervalHours: Double   // duration this reading represents (5/60)
+    let sed:           Double   // per-reading SED — small, sums to daily E(t)
     let bsaPercent:    Double
-    let oralUg:        Double
-    let plasmaLevel:   Double
+    let oralUg:        Double   // snapshot oral µg at time of reading (not used in model directly)
+    let plasmaLevel:   Double   // live estimate shown in UI only — not used in longitudinal model
     let indoors:       Bool
     let bodyPartSED:   BodyPartSED
     let clothingName:  String
