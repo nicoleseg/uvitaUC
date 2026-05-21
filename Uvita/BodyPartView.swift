@@ -91,7 +91,7 @@ struct BodyPartSEDCard: View {
                 .font(.caption2).foregroundColor(.secondary)
         }
         .padding()
-        .background(Color(.secondarySystemBackground))
+        .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16)
         .padding(.horizontal)
     }

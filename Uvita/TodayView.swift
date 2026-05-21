@@ -98,7 +98,7 @@ struct GPSStatusCard: View {
                                 .font(.caption)
                         }
                         .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Color(.tertiarySystemBackground))
+                        .background(Color(UIColor.tertiarySystemBackground))
                         .foregroundColor(.primary)
                         .cornerRadius(8)
                     }
@@ -114,7 +114,7 @@ struct GPSStatusCard: View {
             }
         }
         .padding()
-        .background(Color(.secondarySystemBackground))
+        .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -150,7 +150,7 @@ struct TrackingToggleCard: View {
             }
         }
         .padding()
-        .background(Color(.secondarySystemBackground))
+        .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -226,7 +226,7 @@ struct PlasmaCard: View {
             }
         }
         .frame(maxWidth: .infinity).padding()
-        .background(Color(.secondarySystemBackground))
+        .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -288,7 +288,7 @@ struct DailyTotalCard: View {
             }
         }
         .padding()
-        .background(Color(.secondarySystemBackground))
+        .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -332,7 +332,7 @@ struct TodayLogCard: View {
             }
         }
         .padding(.vertical)
-        .background(Color(.secondarySystemBackground))
+        .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -380,7 +380,7 @@ struct FoodSourceCard: View {
                             .font(.caption).foregroundColor(.secondary)
                     }
                     .padding(12)
-                    .background(Color(.tertiarySystemBackground))
+                    .background(Color(UIColor.tertiarySystemBackground))
                     .cornerRadius(10)
                 }
             } else {
@@ -397,7 +397,7 @@ struct FoodSourceCard: View {
                     }
                 }
                 .padding(12)
-                .background(Color(.tertiarySystemBackground)).cornerRadius(10)
+                .background(Color(UIColor.tertiarySystemBackground)).cornerRadius(10)
             }
 
             // If manualLog, show today's food entries + button
@@ -426,7 +426,7 @@ struct FoodSourceCard: View {
                         }
                     }
                     .padding(8)
-                    .background(Color(.tertiarySystemBackground)).cornerRadius(10)
+                    .background(Color(UIColor.tertiarySystemBackground)).cornerRadius(10)
                 }
 
                 Button { showFoodLog = true } label: {
@@ -439,12 +439,12 @@ struct FoodSourceCard: View {
                             .font(.caption).foregroundColor(.secondary)
                     }
                     .padding(12)
-                    .background(Color(.tertiarySystemBackground)).cornerRadius(10)
+                    .background(Color(UIColor.tertiarySystemBackground)).cornerRadius(10)
                 }
             }
         }
         .padding()
-        .background(Color(.secondarySystemBackground))
+        .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -589,7 +589,7 @@ struct SupplementCard: View {
             }
         }
         .padding()
-        .background(Color(.secondarySystemBackground))
+        .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16).padding(.horizontal)
         .onAppear {
             iuText = store.profile.oralIU == 0
@@ -631,13 +631,13 @@ struct ClothingCard: View {
                     .padding(10)
                     .background(store.profile.clothing == opt
                         ? Color.blue.opacity(0.08)
-                        : Color(.tertiarySystemBackground))
+                        : Color(UIColor.tertiarySystemBackground))
                     .cornerRadius(10)
                 }
             }
         }
         .padding()
-        .background(Color(.secondarySystemBackground))
+        .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -673,7 +673,7 @@ struct FoodLogView: View {
                         }
                     }
                     .padding(10)
-                    .background(Color(.secondarySystemBackground))
+                    .background(Color(UIColor.secondarySystemBackground))
                     .cornerRadius(10)
 
                     Button {
@@ -744,7 +744,7 @@ struct FoodLogView: View {
                                 .font(.subheadline).fontWeight(.bold).foregroundColor(.blue)
                         }.padding()
                     }
-                    .background(Color(.secondarySystemBackground))
+                    .background(Color(UIColor.secondarySystemBackground))
                 }
             }
             .navigationTitle("Log Food")
@@ -1125,12 +1125,12 @@ struct LogNowCard: View {
                     }
                 }
                 .padding(10)
-                .background(Color(.tertiarySystemBackground))
+                .background(Color(UIColor.tertiarySystemBackground))
                 .cornerRadius(10)
             }
         }
         .padding()
-        .background(Color(.secondarySystemBackground))
+        .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -1206,7 +1206,7 @@ struct LogNowSheet: View {
                                             .padding(.vertical, 6)
                                             .background(labelText == s
                                                 ? Color.blue
-                                                : Color(.tertiarySystemBackground))
+                                                : Color(UIColor.tertiarySystemBackground))
                                             .foregroundColor(labelText == s
                                                 ? .white : .primary)
                                             .cornerRadius(8)
@@ -1239,7 +1239,7 @@ struct LogNowSheet: View {
                                             && location.accuracy > 25))
                                         ? "Yes" : "No")
                         }
-                        .background(Color(.tertiarySystemBackground))
+                        .background(Color(UIColor.tertiarySystemBackground))
                         .cornerRadius(10)
                         .padding(.horizontal)
                     }
@@ -1267,7 +1267,7 @@ struct LogNowSheet: View {
                                 DataRow(label: "Saved to",
                                         value: "LabeledReadings/labeled_readings.csv")
                             }
-                            .background(Color(.tertiarySystemBackground))
+                            .background(Color(UIColor.tertiarySystemBackground))
                             .cornerRadius(10)
                             .padding(.horizontal)
                         }

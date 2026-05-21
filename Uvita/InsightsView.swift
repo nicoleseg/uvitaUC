@@ -137,7 +137,7 @@ struct InsightsView: View {
                                     .frame(height: 220).padding(.horizontal)
                             }
                             .padding(.vertical)
-                            .background(Color(.secondarySystemBackground))
+                            .background(Color(UIColor.secondarySystemBackground))
                             .cornerRadius(16).padding(.horizontal)
                         }
 
@@ -171,7 +171,7 @@ struct InsightsView: View {
                                                 .padding(.horizontal, 12).padding(.vertical, 6)
                                                 .background(projectionWindow == days
                                                     ? Color.blue
-                                                    : Color(.tertiarySystemBackground))
+                                                    : Color(UIColor.tertiarySystemBackground))
                                                 .foregroundColor(projectionWindow == days
                                                     ? .white : .primary)
                                                 .cornerRadius(8)
@@ -231,7 +231,7 @@ struct InsightsView: View {
                             }
                         }
                         .padding(.vertical)
-                        .background(Color(.secondarySystemBackground))
+                        .background(Color(UIColor.secondarySystemBackground))
                         .cornerRadius(16).padding(.horizontal)
                     }
                 }
@@ -256,7 +256,7 @@ struct StatMiniCard: View {
             Text(value).font(.subheadline).fontWeight(.bold).foregroundColor(color)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 8)
-        .background(Color(.tertiarySystemBackground)).cornerRadius(10)
+        .background(Color(UIColor.tertiarySystemBackground)).cornerRadius(10)
     }
 }
 
@@ -496,7 +496,7 @@ struct CombinedContributionCard: View {
             }
         }
         .padding()
-        .background(Color(.secondarySystemBackground))
+        .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(16)
         .padding(.horizontal)
     }
