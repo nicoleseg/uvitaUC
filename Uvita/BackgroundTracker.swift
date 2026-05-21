@@ -17,11 +17,7 @@ class BackgroundTracker: ObservableObject {
     let logIntervalSeconds: TimeInterval = 5 * 60
     var logIntervalHours: Double { logIntervalSeconds / 3600.0 }
 
-    // Rolling window of recent raw UVI values (auto-detected).
-    // Window size = 3 readings = 15 min. Smooths out single
-    // GPS-blip spikes before they enter SED calculation.
-    private var uviWindow: [Double] = []
-    private let uviWindowSize = 3
+
 
     private let weather = WeatherService()
 
@@ -32,7 +28,6 @@ class BackgroundTracker: ObservableObject {
 
     func start(location: LocationManager, store: DataStore) {
         isTracking = true
-        uviWindow  = []
         manualIndoorOverride = nil
         UserDefaults.standard.set(true, forKey: "uvita_tracking")
 
@@ -48,7 +43,6 @@ class BackgroundTracker: ObservableObject {
 
     func stop() {
         isTracking = false
-        uviWindow  = []
         manualIndoorOverride = nil
         UserDefaults.standard.set(false, forKey: "uvita_tracking")
     }
@@ -65,6 +59,15 @@ class BackgroundTracker: ObservableObject {
         manualIndoorOverride = isIndoor
         indoors = isIndoor
 
+        // Compute the corrected UVI and SED so corrections.csv
+        // is self-contained — no need to cross-reference UVlogs.
+        // UVI = 0 if user marked indoors, last known UVI if outdoors.
+        let correctedUVI = isIndoor ? 0.0
+            : (store.readings.last?.uvi ?? 0.0)
+        let correctedSED = VitaminDEngine.uviToSED(
+            uvi:           correctedUVI,
+            intervalHours: logIntervalHours)
+
         // Log the correction for later analysis
         FileLogger.logCorrection(
             date:         Date(),
@@ -72,18 +75,26 @@ class BackgroundTracker: ObservableObject {
             lon:          location.longitude,
             accuracy:     location.accuracy,
             autoDetected: wasAuto,
-            userSet:      isIndoor)
+            userSet:      isIndoor,
+            uvi:          correctedUVI,
+            sed:          correctedSED)
 
         // Fire an immediate corrected reading so the plasma
         // estimate updates right away
         Task { @MainActor in
+            // Remove the last auto reading before adding the
+            // corrected one — Option C replacement strategy.
+            // CSV is unaffected (append-only audit log).
+            store.removeLastReadingIfRecent()
             await log(location: location, store: store,
-                      overrideIndoor: isIndoor)
+                      overrideIndoor: isIndoor, label: nil)
         }
     }
 
-    func logNow(location: LocationManager, store: DataStore) async {
-        await log(location: location, store: store)
+    func logNow(location: LocationManager,
+               store: DataStore,
+               label: String? = nil) async {
+        await log(location: location, store: store, label: label)
     }
 
     @MainActor
@@ -103,7 +114,8 @@ class BackgroundTracker: ObservableObject {
     @MainActor
     private func log(location: LocationManager,
                      store: DataStore,
-                     overrideIndoor: Bool? = nil) async {
+                     overrideIndoor: Bool? = nil,
+                     label: String? = nil) async {
         guard location.ready else { return }
         do {
             let w = try await weather.fetch(
@@ -132,21 +144,14 @@ class BackgroundTracker: ObservableObject {
             }
             indoors = resolvedIndoor
 
-            // Rolling average UVI — add raw UVI to window
-            // (0 if indoors, actual if outdoor).
-            // Use the smoothed average for SED so a single
-            // GPS spike at UVI=8 surrounded by 0s becomes
-            // avg=(0+8+0)/3=2.67 instead of a full-spike reading.
+            // Raw UVI — 0 if indoors, actual if outdoors.
+            // No smoothing — the uncertainty flag handles
+            // flagging unreliable readings for evaluation.
             let rawUVI = resolvedIndoor ? 0.0 : w.uvi
-            uviWindow.append(rawUVI)
-            if uviWindow.count > uviWindowSize {
-                uviWindow.removeFirst()
-            }
-            let smoothedUVI = uviWindow.reduce(0,+) / Double(uviWindow.count)
 
-            // SED for this 5-min interval using smoothed UVI
+            // SED for this 5-min interval
             let sed = VitaminDEngine.uviToSED(
-                uvi:           smoothedUVI,
+                uvi:           rawUVI,
                 intervalHours: logIntervalHours)
 
             let profile     = store.profile
@@ -165,9 +170,16 @@ class BackgroundTracker: ObservableObject {
                 C0:        profile.initialLevel
             ).first ?? profile.initialLevel
 
+            // Uncertainty flag — for CSV evaluation only.
+            // Poor accuracy alone, or stationary + moderate accuracy,
+            // suggests the reading may be unreliable.
+            // Does not change SED, indoor state, or plasma calculation.
+            let isUncertain = location.accuracy > 40
+                || (location.isStationary && location.accuracy > 25)
+
             let reading = DayReading(
                 date:          Date(),
-                uvi:           smoothedUVI,
+                uvi:           rawUVI,
                 intervalHours: logIntervalHours,
                 sed:           sed,
                 bsaPercent:    profile.clothing.bsaPercent,
@@ -175,7 +187,12 @@ class BackgroundTracker: ObservableObject {
                 plasmaLevel:   plasma,
                 indoors:       resolvedIndoor,
                 bodyPartSED:   bodyPartSED,
-                clothingName:  profile.clothing.rawValue)
+                clothingName:  profile.clothing.rawValue,
+                isUncertain:   isUncertain,
+                label:         label,
+                lat:           location.latitude,
+                lon:           location.longitude,
+                gpsAccuracy:   location.accuracy)
 
             store.addReading(reading)
             FileLogger.log(reading: reading)

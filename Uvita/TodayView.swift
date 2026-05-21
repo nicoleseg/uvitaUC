@@ -6,8 +6,9 @@ struct TodayView: View {
     @EnvironmentObject var store:    DataStore
     @EnvironmentObject var tracker:  BackgroundTracker
 
-    @State private var showOralSourceSheet = false
-    @State private var showFoodLogSheet    = false
+    @State private var showOralSourceSheet  = false
+    @State private var showFoodLogSheet     = false
+    @State private var showLogNowSheet      = false
 
     var body: some View {
         NavigationView {
@@ -23,6 +24,7 @@ struct TodayView: View {
                         showSourceSheet: $showOralSourceSheet,
                         showFoodLog:     $showFoodLogSheet)
                     SupplementCard()
+                    LogNowCard(showSheet: $showLogNowSheet)
                 }
                 .padding(.vertical)
             }
@@ -35,6 +37,11 @@ struct TodayView: View {
             }
             .sheet(isPresented: $showFoodLogSheet) {
                 FoodLogView().environmentObject(store)
+            }
+            .sheet(isPresented: $showLogNowSheet) {
+                LogNowSheet().environmentObject(store)
+                    .environmentObject(tracker)
+                    .environmentObject(location)
             }
         }
     }
@@ -151,28 +158,71 @@ struct TrackingToggleCard: View {
 // ── Plasma card ───────────────────────────────────────────────
 struct PlasmaCard: View {
     @EnvironmentObject var store: DataStore
-    var level: Double { store.currentPlasmaLevel() }
-    var color: Color { level < 30 ? .red : level < 50 ? .orange : .green }
-    var label: String {
-        level < 30 ? "Deficient  (<30 nmol/L)"
-        : level < 50 ? "Insufficient  (30–50 nmol/L)"
+
+    var absolute:    Double { store.currentPlasmaLevel() }
+    var delta:       Double { store.todayContribution() }
+    var absColor:    Color  {
+        absolute < 30 ? .red : absolute < 50 ? .orange : .green
+    }
+    var deltaColor:  Color  { delta >= 0 ? .green : .red }
+    var statusLabel: String {
+        absolute < 30 ? "Deficient  (<30 nmol/L)"
+        : absolute < 50 ? "Insufficient  (30–50 nmol/L)"
         : "Sufficient  (50+ nmol/L)"
     }
+
     var body: some View {
-        VStack(spacing: 6) {
-            Text("Estimated plasma 25(OH)D")
+        VStack(spacing: 8) {
+
+            // Today's cumulative contribution — main number
+            Text("Today's vitamin D contribution")
                 .font(.caption).foregroundColor(.secondary)
-            Text(String(format: "%.1f", level))
-                .font(.system(size: 68, weight: .black)).foregroundColor(color)
-            Text("nmol/L").font(.subheadline).foregroundColor(.secondary)
-            Text(label)
-                .font(.caption).fontWeight(.semibold)
-                .padding(.horizontal, 14).padding(.vertical, 5)
-                .background(color.opacity(0.12)).foregroundColor(color)
-                .cornerRadius(99)
-            if store.todayReadings.last?.uvi == 0 {
-                Text("UV was 0 today — indoors or awaiting outdoor confirmation")
-                    .font(.caption2).foregroundColor(.secondary).padding(.top, 2)
+
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(delta >= 0 ? "+" : "")
+                    .font(.system(size: 36, weight: .bold))
+                    .foregroundColor(deltaColor)
+                Text(String(format: "%.2f", delta))
+                    .font(.system(size: 56, weight: .black))
+                    .foregroundColor(deltaColor)
+                Text("nmol/L")
+                    .font(.subheadline).foregroundColor(.secondary)
+                    .padding(.bottom, 4)
+            }
+
+            Text("today so far · updates with each reading")
+                .font(.caption2).foregroundColor(.secondary)
+
+            Divider().padding(.horizontal, 20)
+
+            // Absolute level below
+            HStack(spacing: 6) {
+                VStack(spacing: 2) {
+                    Text("Absolute level")
+                        .font(.caption2).foregroundColor(.secondary)
+                    Text(String(format: "%.1f nmol/L", absolute))
+                        .font(.subheadline).fontWeight(.bold)
+                        .foregroundColor(absColor)
+                }
+                Spacer()
+                Text(statusLabel)
+                    .font(.caption).fontWeight(.semibold)
+                    .padding(.horizontal, 12).padding(.vertical, 5)
+                    .background(absColor.opacity(0.12))
+                    .foregroundColor(absColor)
+                    .cornerRadius(99)
+            }
+            .padding(.horizontal, 4)
+
+            Text("Full longitudinal estimate in Insights")
+                .font(.caption2).foregroundColor(.secondary)
+
+            if delta == 0 && store.todayReadings.isEmpty {
+                Text("No readings yet today")
+                    .font(.caption2).foregroundColor(.secondary)
+            } else if store.todayReadings.last?.uvi == 0 {
+                Text("UV = 0 so far — indoors or overcast")
+                    .font(.caption2).foregroundColor(.secondary)
             }
         }
         .frame(maxWidth: .infinity).padding()
@@ -205,11 +255,11 @@ struct DailyTotalCard: View {
                 .frame(maxWidth: .infinity)
                 Divider().frame(height: 40)
                 VStack(spacing: 3) {
-                    Text("Est. plasma").font(.caption2).foregroundColor(.secondary)
-                    let level = store.currentPlasmaLevel()
-                    Text(String(format: "%.1f", level))
+                    Text("Today delta").font(.caption2).foregroundColor(.secondary)
+                    let d = store.todayContribution()
+                    Text(String(format: "%@%.2f", d >= 0 ? "+" : "", d))
                         .font(.title3).fontWeight(.bold)
-                        .foregroundColor(level < 30 ? .red : level < 50 ? .orange : .green)
+                        .foregroundColor(d >= 0 ? .green : .red)
                     Text("nmol/L").font(.caption2).foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity)
@@ -1014,5 +1064,289 @@ struct FoodSearchService {
             .subtracting(.init(charactersIn: ".")))
             .joined()
         return Double(num)
+    }
+}
+
+// ── Log Now card ──────────────────────────────────────────────
+// Triggers an immediate labeled reading for ground-truth
+// evaluation. Shows last labeled reading below the button.
+struct LogNowCard: View {
+    @EnvironmentObject var store:    DataStore
+    @Binding var showSheet: Bool
+
+    var lastLabeled: DayReading? {
+        store.readings
+            .filter { $0.label != nil }
+            .sorted { $0.date > $1.date }
+            .first
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Manual labeled reading")
+                        .font(.headline)
+                    Text("Capture an instant snapshot with a custom label")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                Button {
+                    showSheet = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "location.fill.viewfinder")
+                        Text("Log now")
+                            .fontWeight(.semibold)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
+                }
+            }
+
+            if let r = lastLabeled {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green).font(.caption)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(r.label ?? "")
+                            .font(.caption).fontWeight(.semibold)
+                        Text(String(format:
+                            "%@ · %@ · UVI %.1f · ±%.0fm",
+                            r.date.formatted(.dateTime.hour().minute()),
+                            r.indoors ? "indoors" : "outdoors",
+                            r.uvi, r.gpsAccuracy))
+                            .font(.caption2).foregroundColor(.secondary)
+                        Text(String(format: "%.6f, %.6f", r.lat, r.lon))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(10)
+                .background(Color(.tertiarySystemBackground))
+                .cornerRadius(10)
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(16).padding(.horizontal)
+    }
+}
+
+// ── Log Now sheet ─────────────────────────────────────────────
+struct LogNowSheet: View {
+    @EnvironmentObject var store:    DataStore
+    @EnvironmentObject var tracker:  BackgroundTracker
+    @EnvironmentObject var location: LocationManager
+    @Environment(\.dismiss) var dismiss
+
+    @State private var labelText   = ""
+    @State private var isLogging   = false
+    @State private var loggedReading: DayReading? = nil
+
+    // Suggested label prefixes for quick entry
+    let suggestions = [
+        "Tech building, inside",
+        "Tech building, entrance",
+        "Outside Tech, front",
+        "Library, inside",
+        "Outside, open sky",
+        "Covered walkway",
+        "Parking garage",
+        "Office, window seat",
+        "Office, no window",
+    ]
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil, from: nil, for: nil)
+    }
+
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+
+                    // Label input
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Label this reading")
+                            .font(.headline)
+                        Text("Describe where you are — used for evaluation later")
+                            .font(.caption).foregroundColor(.secondary)
+                        TextField("e.g. Tech building, front entrance",
+                                  text: $labelText)
+                            .textFieldStyle(.roundedBorder)
+                            .toolbar {
+                                ToolbarItemGroup(placement: .keyboard) {
+                                    Spacer()
+                                    Button("Done") { dismissKeyboard() }
+                                }
+                            }
+                    }
+                    .padding(.horizontal)
+
+                    // Quick suggestions
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Quick labels")
+                            .font(.caption).foregroundColor(.secondary)
+                            .padding(.horizontal)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(suggestions, id: \.self) { s in
+                                    Button {
+                                        labelText = s
+                                        dismissKeyboard()
+                                    } label: {
+                                        Text(s)
+                                            .font(.caption)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(labelText == s
+                                                ? Color.blue
+                                                : Color(.tertiarySystemBackground))
+                                            .foregroundColor(labelText == s
+                                                ? .white : .primary)
+                                            .cornerRadius(8)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                    }
+
+                    // Current GPS + indoor state preview
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Will be logged with")
+                            .font(.caption).foregroundColor(.secondary)
+                            .padding(.horizontal)
+                        VStack(spacing: 0) {
+                            DataRow(label: "Location",
+                                    value: String(format: "%.6f, %.6f",
+                                        location.latitude, location.longitude))
+                            DataRow(label: "GPS accuracy",
+                                    value: String(format: "±%.0f m",
+                                        location.accuracy))
+                            DataRow(label: "Indoor/outdoor",
+                                    value: tracker.indoors ? "Indoors" : "Outdoors")
+                            DataRow(label: "Stationary",
+                                    value: location.isStationary ? "Yes" : "No")
+                            DataRow(label: "Uncertain flag",
+                                    value: (location.accuracy > 40
+                                        || (location.isStationary
+                                            && location.accuracy > 25))
+                                        ? "Yes" : "No")
+                        }
+                        .background(Color(.tertiarySystemBackground))
+                        .cornerRadius(10)
+                        .padding(.horizontal)
+                    }
+
+                    // Result after logging
+                    if let r = loggedReading {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("Logged successfully")
+                                    .font(.subheadline).fontWeight(.semibold)
+                                    .foregroundColor(.green)
+                            }
+                            .padding(.horizontal)
+                            VStack(spacing: 0) {
+                                DataRow(label: "Label",    value: r.label ?? "")
+                                DataRow(label: "UVI (smoothed)",
+                                        value: String(format: "%.2f", r.uvi))
+                                DataRow(label: "SED",
+                                        value: String(format: "%.6f", r.sed))
+                                DataRow(label: "Plasma est.",
+                                        value: String(format: "%.1f nmol/L",
+                                            r.plasmaLevel))
+                                DataRow(label: "Saved to",
+                                        value: "LabeledReadings/labeled_readings.csv")
+                            }
+                            .background(Color(.tertiarySystemBackground))
+                            .cornerRadius(10)
+                            .padding(.horizontal)
+                        }
+                    }
+
+                    Spacer(minLength: 20)
+
+                    // Log button
+                    Button {
+                        guard !labelText.trimmingCharacters(
+                            in: .whitespaces).isEmpty else { return }
+                        dismissKeyboard()
+                        isLogging = true
+                        Task {
+                            await tracker.logNow(
+                                location: location,
+                                store: store,
+                                label: labelText.trimmingCharacters(
+                                    in: .whitespaces))
+                            // Get the reading just added
+                            loggedReading = store.readings
+                                .filter { $0.label != nil }
+                                .sorted { $0.date > $1.date }
+                                .first
+                            isLogging = false
+                        }
+                    } label: {
+                        HStack {
+                            if isLogging {
+                                ProgressView().tint(.white)
+                            } else {
+                                Image(systemName: "location.fill.viewfinder")
+                            }
+                            Text(isLogging ? "Logging…" : "Log reading now")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(labelText.trimmingCharacters(
+                            in: .whitespaces).isEmpty || isLogging
+                            ? Color.gray : Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                    }
+                    .disabled(labelText.trimmingCharacters(
+                        in: .whitespaces).isEmpty || isLogging)
+                    .padding(.horizontal)
+                }
+                .padding(.vertical)
+            }
+            .navigationTitle("Log Now")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                if loggedReading != nil {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct DataRow: View {
+    let label: String
+    let value: String
+    var body: some View {
+        HStack {
+            Text(label).font(.caption).foregroundColor(.secondary)
+            Spacer()
+            Text(value)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(.primary)
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        Divider().padding(.horizontal, 12)
     }
 }

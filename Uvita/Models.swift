@@ -36,14 +36,16 @@ enum ClothingOption: String, CaseIterable, Identifiable, Codable {
     case tankShorts       = "Tank top + shorts"
     case swimwear         = "Swimwear / very minimal"
     var id: String { rawValue }
+    // Total BSA% per clothing option — Lund-Browder adult chart.
+    // Updated to match body-part breakdowns below exactly.
     var bsaPercent: Double {
         switch self {
-        case .fullyCovered:     return 2.0
-        case .longSleevesPants: return 7.0
-        case .tshirtPants:      return 13.0
-        case .tshirtShorts:     return 30.0
-        case .tankShorts:       return 37.0
-        case .swimwear:         return 80.0
+        case .fullyCovered:     return 7.0   // head only
+        case .longSleevesPants: return 14.0  // head+neck+hands
+        case .tshirtPants:      return 20.0  // head+neck+forearms+hands
+        case .tshirtShorts:     return 36.0  // +upperArms+lowerLegs
+        case .tankShorts:       return 53.0  // +torso partial+upperLegs partial
+        case .swimwear:         return 80.0  // near full body
         }
     }
 }
@@ -178,84 +180,111 @@ struct VitaminDEngine {
 }
 
 // Per-body-part BSA breakdown from Lund-Browder chart
+// Body part exposure — ordered head to toe
 struct BodyPartExposure: Codable {
     let head:      Double
-    let hands:     Double
-    let forearms:  Double
+    let neck:      Double
     let upperArms: Double
-    let lowerLegs: Double
-    let upperLegs: Double
+    let forearms:  Double
+    let hands:     Double
     let torso:     Double
+    let upperLegs: Double
+    let lowerLegs: Double
 }
 
 extension ClothingOption {
+    // Body-part BSA% exposures — Lund-Browder adult chart.
+    // Head=7%, Neck=2%, UpperArms=8%, Forearms=6%, Hands=5%,
+    // Torso(ant+post)=36%, UpperLegs=19%, LowerLegs=14%.
+    // Values here are exposed fractions of each region per
+    // clothing option. Ordered head-to-toe.
     var bodyPartExposure: BodyPartExposure {
         switch self {
         case .fullyCovered:
-            return BodyPartExposure(head: 2, hands: 0, forearms: 0,
-                                    upperArms: 0, lowerLegs: 0,
-                                    upperLegs: 0, torso: 0)
+            // Only head exposed — hat/hood not assumed
+            return BodyPartExposure(
+                head: 7, neck: 0, upperArms: 0, forearms: 0, hands: 0,
+                torso: 0, upperLegs: 0, lowerLegs: 0)
         case .longSleevesPants:
-            return BodyPartExposure(head: 2, hands: 5, forearms: 0,
-                                    upperArms: 0, lowerLegs: 0,
-                                    upperLegs: 0, torso: 0)
+            // Head, neck, hands exposed
+            return BodyPartExposure(
+                head: 7, neck: 2, upperArms: 0, forearms: 0, hands: 5,
+                torso: 0, upperLegs: 0, lowerLegs: 0)
         case .tshirtPants:
-            return BodyPartExposure(head: 2, hands: 5, forearms: 6,
-                                    upperArms: 0, lowerLegs: 0,
-                                    upperLegs: 0, torso: 0)
+            // Head, neck, forearms, hands (short sleeves cover upper arms)
+            return BodyPartExposure(
+                head: 7, neck: 2, upperArms: 0, forearms: 6, hands: 5,
+                torso: 0, upperLegs: 0, lowerLegs: 0)
         case .tshirtShorts:
-            return BodyPartExposure(head: 2, hands: 5, forearms: 6,
-                                    upperArms: 9, lowerLegs: 8,
-                                    upperLegs: 0, torso: 0)
+            // Head, neck, upper arms, forearms, hands, lower legs
+            return BodyPartExposure(
+                head: 7, neck: 2, upperArms: 8, forearms: 6, hands: 5,
+                torso: 0, upperLegs: 0, lowerLegs: 8)
         case .tankShorts:
-            return BodyPartExposure(head: 2, hands: 5, forearms: 6,
-                                    upperArms: 9, lowerLegs: 8,
-                                    upperLegs: 3, torso: 4)
+            // Above + partial torso exposure + partial upper legs
+            return BodyPartExposure(
+                head: 7, neck: 2, upperArms: 8, forearms: 6, hands: 5,
+                torso: 9, upperLegs: 8, lowerLegs: 8)
         case .swimwear:
-            return BodyPartExposure(head: 2, hands: 5, forearms: 6,
-                                    upperArms: 9, lowerLegs: 8,
-                                    upperLegs: 11, torso: 18)
+            // Near full body — swimsuit covers ~20% (pelvis/buttocks)
+            // Torso: ant(18)+post(18)-swimsuit(~10) = 26%
+            // UpperLegs: 19 - swimsuit overlap (~7) = 12%
+            return BodyPartExposure(
+                head: 7, neck: 2, upperArms: 8, forearms: 6, hands: 5,
+                torso: 26, upperLegs: 12, lowerLegs: 14)
         }
     }
 }
 
+// Body part SED — ordered head to toe, neck added
 struct BodyPartSED: Codable {
     let head:      Double
-    let hands:     Double
-    let forearms:  Double
+    let neck:      Double
     let upperArms: Double
-    let lowerLegs: Double
-    let upperLegs: Double
+    let forearms:  Double
+    let hands:     Double
     let torso:     Double
+    let upperLegs: Double
+    let lowerLegs: Double
 
     static func compute(baseSED: Double,
                         clothing: ClothingOption) -> BodyPartSED {
         let bp    = clothing.bodyPartExposure
         let total = clothing.bsaPercent
         guard total > 0 else {
-            return BodyPartSED(head: 0, hands: 0, forearms: 0,
-                               upperArms: 0, lowerLegs: 0,
-                               upperLegs: 0, torso: 0)
+            return BodyPartSED(head: 0, neck: 0, upperArms: 0,
+                               forearms: 0, hands: 0, torso: 0,
+                               upperLegs: 0, lowerLegs: 0)
         }
         return BodyPartSED(
             head:      baseSED * bp.head      / total,
-            hands:     baseSED * bp.hands     / total,
-            forearms:  baseSED * bp.forearms  / total,
+            neck:      baseSED * bp.neck      / total,
             upperArms: baseSED * bp.upperArms / total,
-            lowerLegs: baseSED * bp.lowerLegs / total,
+            forearms:  baseSED * bp.forearms  / total,
+            hands:     baseSED * bp.hands     / total,
+            torso:     baseSED * bp.torso     / total,
             upperLegs: baseSED * bp.upperLegs / total,
-            torso:     baseSED * bp.torso     / total)
+            lowerLegs: baseSED * bp.lowerLegs / total)
+    }
+
+    // Ordered head-to-toe for display
+    var asOrderedPairs: [(String, Double)] {
+        [("Head",       head),
+         ("Neck",       neck),
+         ("Upper Arms", upperArms),
+         ("Forearms",   forearms),
+         ("Hands",      hands),
+         ("Torso",      torso),
+         ("Upper Legs", upperLegs),
+         ("Lower Legs", lowerLegs)]
     }
 
     var asDictionary: [String: Double] {
-        ["Head": head, "Hands": hands,
-         "Forearms": forearms, "Upper Arms": upperArms,
-         "Lower Legs": lowerLegs, "Upper Legs": upperLegs,
-         "Torso": torso]
+        Dictionary(uniqueKeysWithValues: asOrderedPairs)
     }
 
     var mostExposed: (String, Double) {
-        asDictionary.max(by: { $0.value < $1.value }) ?? ("None", 0)
+        asOrderedPairs.max(by: { $0.1 < $1.1 }) ?? ("None", 0)
     }
 }
 
@@ -275,6 +304,22 @@ struct DayReading: Codable, Identifiable {
     let indoors:       Bool
     let bodyPartSED:   BodyPartSED
     let clothingName:  String
+    // Uncertainty flag — true when GPS accuracy was poor at time of reading.
+    // Does NOT affect indoor/outdoor detection or SED calculation.
+    // Logged to CSV for later evaluation of detector reliability.
+    // Uncertain when: accuracy > 40m (poor fix) OR
+    //                 accuracy > 25m AND device was stationary
+    //                 (stationary + poor accuracy = weak indoor signal pattern)
+    let isUncertain:   Bool
+    // Optional label for manually triggered readings.
+    // nil for automatic 5-min readings.
+    // Set by user via the "Log now" button for ground-truth annotation.
+    let label:         String?
+    // GPS coordinates at time of reading — always stored,
+    // used for manual labeled readings and corrections evaluation.
+    let lat:           Double
+    let lon:           Double
+    let gpsAccuracy:   Double
 }
 
 struct FoodLogEntry: Codable, Identifiable {

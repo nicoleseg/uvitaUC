@@ -1,9 +1,15 @@
 import CoreLocation
+import CoreMotion
 import Combine
 
 class LocationManager: NSObject, ObservableObject,
                        CLLocationManagerDelegate {
-    private let mgr = CLLocationManager()
+    private let mgr    = CLLocationManager()
+    private let motion = CMMotionActivityManager()
+
+    // Latest motion activity — updated continuously in background.
+    // Used only for the isUncertain flag; does not affect tracking logic.
+    @Published var isStationary: Bool = false
 
     @Published var latitude:  Double = 0
     @Published var longitude: Double = 0
@@ -32,6 +38,14 @@ class LocationManager: NSObject, ObservableObject,
         mgr.distanceFilter = 50
         mgr.requestAlwaysAuthorization()
         mgr.startUpdatingLocation()
+
+        // Start motion activity updates for uncertainty flagging
+        if CMMotionActivityManager.isActivityAvailable() {
+            motion.startActivityUpdates(to: .main) { [weak self] activity in
+                guard let a = activity else { return }
+                self?.isStationary = a.stationary
+            }
+        }
     }
 
     func locationManager(

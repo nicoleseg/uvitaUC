@@ -25,6 +25,21 @@ class DataStore: ObservableObject {
         saveReadings()
     }
 
+    // Remove the most recent auto reading if it was taken
+    // within the last 6 minutes — called before adding a
+    // corrected reading so the wrong one doesn't pollute
+    // the daily SED aggregate or the model.
+    // The original wrong reading remains in the CSV as an
+    // append-only audit log — only removed from DataStore.
+    func removeLastReadingIfRecent() {
+        guard let last = readings.last,
+              last.label == nil,  // only remove auto readings
+              Date().timeIntervalSince(last.date) < 6 * 60
+        else { return }
+        readings.removeLast()
+        saveReadings()
+    }
+
     func addFoodLog(_ entry: FoodLogEntry) {
         foodLog.append(entry)
         saveFoodLog()
@@ -129,6 +144,8 @@ class DataStore: ObservableObject {
             }
     }
 
+    // Absolute longitudinal plasma level as of right now.
+    // Runs full Diffey model across all days up to today.
     func currentPlasmaLevel() -> Double {
         let aggs = buildDayAggregates()
         guard !aggs.isEmpty else { return profile.initialLevel }
@@ -140,6 +157,34 @@ class DataStore: ObservableObject {
             skinType:  profile.skinType,
             C0:        profile.initialLevel)
         return result.last ?? profile.initialLevel
+    }
+
+    // Yesterday's ending plasma level — used to compute
+    // today's delta on the Today tab.
+    func yesterdayPlasmaLevel() -> Double {
+        let cal = Calendar.current
+        guard let yesterday = cal.date(
+            byAdding: .day, value: -1, to: cal.startOfDay(for: Date()))
+        else { return profile.initialLevel }
+        let end  = cal.date(bySettingHour: 23, minute: 59,
+                            second: 59, of: yesterday) ?? yesterday
+        let aggs = buildDayAggregates(upTo: end)
+        guard !aggs.isEmpty else { return profile.initialLevel }
+        let result = VitaminDEngine.runModel(
+            oralDoses: aggs.map { $0.oralDose },
+            uvDoses:   aggs.map { $0.uvDose },
+            bodyAreas: aggs.map { $0.bsa },
+            age:       profile.age,
+            skinType:  profile.skinType,
+            C0:        profile.initialLevel)
+        return result.last ?? profile.initialLevel
+    }
+
+    // Today's contribution = current absolute - yesterday's ending level.
+    // This is what the Today tab big number shows.
+    // Positive = gained vitamin D today, negative = losing (low UV day).
+    func todayContribution() -> Double {
+        currentPlasmaLevel() - yesterdayPlasmaLevel()
     }
 
     func plasmaForDay(_ date: Date) -> Double {
@@ -228,27 +273,36 @@ class DataStore: ObservableObject {
 
     // ── Body part SED ────────────────────────────────────────
 
-    func cumulativeBodyPartSED() -> [String: Double] {
+    func cumulativeBodyPartSED() -> [(String, Double)] {
         var totals: [String: Double] = [
-            "Head": 0, "Hands": 0, "Forearms": 0,
-            "Upper Arms": 0, "Lower Legs": 0,
-            "Upper Legs": 0, "Torso": 0
+            "Head": 0, "Neck": 0, "Upper Arms": 0,
+            "Forearms": 0, "Hands": 0, "Torso": 0,
+            "Upper Legs": 0, "Lower Legs": 0
         ]
-        for r in readings where !r.indoors {
-            totals["Head",      default: 0] += r.bodyPartSED.head
-            totals["Hands",     default: 0] += r.bodyPartSED.hands
-            totals["Forearms",  default: 0] += r.bodyPartSED.forearms
-            totals["Upper Arms",default: 0] += r.bodyPartSED.upperArms
-            totals["Lower Legs",default: 0] += r.bodyPartSED.lowerLegs
-            totals["Upper Legs",default: 0] += r.bodyPartSED.upperLegs
-            totals["Torso",     default: 0] += r.bodyPartSED.torso
+        for r in readings where !r.indoors && r.label == nil {
+            totals["Head",       default: 0] += r.bodyPartSED.head
+            totals["Neck",       default: 0] += r.bodyPartSED.neck
+            totals["Upper Arms", default: 0] += r.bodyPartSED.upperArms
+            totals["Forearms",   default: 0] += r.bodyPartSED.forearms
+            totals["Hands",      default: 0] += r.bodyPartSED.hands
+            totals["Torso",      default: 0] += r.bodyPartSED.torso
+            totals["Upper Legs", default: 0] += r.bodyPartSED.upperLegs
+            totals["Lower Legs", default: 0] += r.bodyPartSED.lowerLegs
         }
-        return totals
+        // Return head-to-toe order
+        return [("Head", totals["Head"]!),
+                ("Neck", totals["Neck"]!),
+                ("Upper Arms", totals["Upper Arms"]!),
+                ("Forearms", totals["Forearms"]!),
+                ("Hands", totals["Hands"]!),
+                ("Torso", totals["Torso"]!),
+                ("Upper Legs", totals["Upper Legs"]!),
+                ("Lower Legs", totals["Lower Legs"]!)]
     }
 
     var mostExposedBodyPart: (String, Double) {
         cumulativeBodyPartSED()
-            .max(by: { $0.value < $1.value }) ?? ("None", 0)
+            .max(by: { $0.1 < $1.1 }) ?? ("None", 0)
     }
 
     // ── Persistence ──────────────────────────────────────────

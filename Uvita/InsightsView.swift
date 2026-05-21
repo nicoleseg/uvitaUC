@@ -141,58 +141,14 @@ struct InsightsView: View {
                             .cornerRadius(16).padding(.horizontal)
                         }
 
-                        // Contribution breakdown
+                        // Combined contribution section
                         if !longitudinalData.isEmpty {
-                            HStack(alignment: .top, spacing: 12) {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Vitamin D by Source")
-                                        .font(.headline)
-                                    Text("Cumulative over \(daysToShow)-day window")
-                                        .font(.caption2).foregroundColor(.secondary)
-                                    ContributionBar(
-                                        uvContrib:   totalUV,
-                                        oralContrib: totalOral,
-                                        baseline:    store.profile.initialLevel,
-                                        total:       totalCombined)
-                                        .frame(width: 110, height: 100)
-                                        .padding(.leading, 65)
-                                }
-                                .frame(maxWidth: .infinity).padding()
-                                .background(Color(.secondarySystemBackground))
-                                .cornerRadius(16)
-
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Contribution Breakdown")
-                                        .font(.headline)
-                                    let netGain = max(0.01, totalUV + totalOral)
-                                    let uvPct   = totalUV   / netGain * 100
-                                    let orPct   = totalOral / netGain * 100
-                                    HStack(spacing: 10) {
-                                        ContribCard(
-                                            label: "UV synthesis",
-                                            value: String(format: "%.1f%%", uvPct),
-                                            sub:   String(format: "+%.2f nmol/L", totalUV),
-                                            color: .orange).scaleEffect(0.88)
-                                        ContribCard(
-                                            label: "Oral intake",
-                                            value: String(format: "%.1f%%", orPct),
-                                            sub:   String(format: "+%.2f nmol/L", totalOral),
-                                            color: .blue).scaleEffect(0.88)
-                                    }
-                                    Text(uvPct > 60
-                                         ? "Matches paper — UV dominant"
-                                         : "UV lower than expected")
-                                        .font(.caption2)
-                                        .foregroundColor(uvPct > 60 ? .green : .orange)
-                                        .padding(8)
-                                        .background(Color(.tertiarySystemBackground))
-                                        .cornerRadius(8)
-                                }
-                                .frame(maxWidth: .infinity).padding()
-                                .background(Color(.secondarySystemBackground))
-                                .cornerRadius(16)
-                            }
-                            .padding(.horizontal)
+                            CombinedContributionCard(
+                                uvContrib:   totalUV,
+                                oralContrib: totalOral,
+                                baseline:    store.profile.initialLevel,
+                                total:       totalCombined,
+                                daysToShow:  daysToShow)
                         }
 
                         BodyPartSEDCard()
@@ -250,10 +206,12 @@ struct InsightsView: View {
                                         color: .orange)
                                     StatMiniCard(
                                         label: "Escapes deficiency",
+                                        sublabel: "(≥30 nmol/L)",
                                         value: daysToEscapeDeficiency.map { "Day \($0)" } ?? "Not in 90d",
                                         color: daysToEscapeDeficiency != nil ? .green : .red)
                                     StatMiniCard(
                                         label: "Reaches sufficiency",
+                                        sublabel: "(≥50 nmol/L)",
                                         value: daysToSufficiency.map { "Day \($0)" } ?? "Not in 90d",
                                         color: daysToSufficiency != nil ? .green : .red)
                                 }.padding(.horizontal)
@@ -285,12 +243,16 @@ struct InsightsView: View {
 }
 
 struct StatMiniCard: View {
-    let label: String
-    let value: String
-    let color: Color
+    let label:    String
+    var sublabel: String? = nil
+    let value:    String
+    let color:    Color
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 3) {
             Text(label).font(.caption2).foregroundColor(.secondary)
+            if let sub = sublabel {
+                Text(sub).font(.system(size: 10)).foregroundColor(.secondary)
+            }
             Text(value).font(.subheadline).fontWeight(.bold).foregroundColor(color)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 8)
@@ -369,68 +331,9 @@ struct LongitudinalLineChart: View {
     }
 }
 
-// ── Contribution bar ──────────────────────────────────────────
-struct ContributionBar: View {
-    let uvContrib: Double; let oralContrib: Double
-    let baseline: Double;  let total: Double
-    var body: some View {
-        GeometryReader { geo in
-            let w       = geo.size.width * 0.4
-            let h       = geo.size.height - 30
-            let netGain = max(0.01, uvContrib + oralContrib)
-            let scaleH  = h / netGain
-            HStack(alignment: .bottom, spacing: 20) {
-                VStack(spacing: 0) {
-                    Text(String(format: "%.1f nmol/L", total))
-                        .font(.system(size: 10, weight: .bold))
-                    ZStack(alignment: .bottom) {
-                        Rectangle().fill(Color.gray.opacity(0.2))
-                            .frame(width: w, height: CGFloat(baseline) * scaleH * 0.3)
-                        VStack(spacing: 0) {
-                            Rectangle().fill(Color.orange)
-                                .frame(width: w, height: max(2, CGFloat(uvContrib) * scaleH))
-                            Rectangle().fill(Color.blue)
-                                .frame(width: w, height: max(2, CGFloat(oralContrib) * scaleH))
-                        }
-                    }
-                    Text("You").font(.system(size: 10)).foregroundColor(.secondary)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 6) {
-                        Rectangle().fill(Color.orange).frame(width:14,height:14).cornerRadius(2)
-                        Text("UV synthesis").font(.caption)
-                    }
-                    HStack(spacing: 6) {
-                        Rectangle().fill(Color.blue).frame(width:14,height:14).cornerRadius(2)
-                        Text("Oral intake").font(.caption)
-                    }
-                    HStack(spacing: 6) {
-                        Rectangle().fill(Color.gray.opacity(0.4)).frame(width:14,height:14).cornerRadius(2)
-                        Text("Baseline").font(.caption)
-                    }
-                    Spacer()
-                    Text("Paper avg: UV = 73–98%").font(.caption2).foregroundColor(.secondary)
-                }
-                .padding(.bottom, 22)
-                Spacer()
-            }
-        }
-    }
-}
 
-struct ContribCard: View {
-    let label: String; let value: String
-    let sub: String;   let color: Color
-    var body: some View {
-        VStack(spacing: 4) {
-            Text(label).font(.caption2).foregroundColor(.secondary)
-            Text(value).font(.title3).fontWeight(.bold).foregroundColor(color)
-            Text(sub).font(.caption2).foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity).padding(.vertical, 10)
-        .background(Color(.tertiarySystemBackground)).cornerRadius(12)
-    }
-}
+
+
 
 // ── Projection chart — segment-colored by value ───────────────
 struct ProjectionChart: View {
@@ -489,5 +392,112 @@ struct ProjectionChart: View {
                     .foregroundColor(.secondary).position(x: w - 20, y: h + 22)
             }
         }
+    }
+}
+
+// ── Combined contribution card ────────────────────────────────
+// Single card replacing the old "Vitamin D by Source" +
+// "Contribution Breakdown" pair. Stacked horizontal bar with
+// percentages inside each segment, nmol/L values below.
+struct CombinedContributionCard: View {
+    let uvContrib:   Double
+    let oralContrib: Double
+    let baseline:    Double
+    let total:       Double
+    let daysToShow:  Int
+
+    var netGain: Double { max(0.01, uvContrib + oralContrib) }
+    var uvPct:   Double { uvContrib   / netGain * 100 }
+    var orPct:   Double { oralContrib / netGain * 100 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Vitamin D Contribution")
+                    .font(.headline)
+                Text("Cumulative over \(daysToShow)-day window · UV vs oral split")
+                    .font(.caption2).foregroundColor(.secondary)
+            }
+
+            // Stacked horizontal bar
+            GeometryReader { geo in
+                let w = geo.size.width
+                let uvW   = CGFloat(uvPct   / 100) * w
+                let orW   = CGFloat(orPct   / 100) * w
+                ZStack(alignment: .leading) {
+                    // UV segment
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.orange)
+                        .frame(width: max(uvW, 2), height: 36)
+                    // Oral segment
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.blue)
+                        .frame(width: max(orW, 2), height: 36)
+                        .offset(x: uvW)
+                    // UV label inside bar
+                    if uvW > 44 {
+                        Text(String(format: "%.0f%%", uvPct))
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.white)
+                            .offset(x: uvW / 2 - 14)
+                    }
+                    // Oral label inside bar
+                    if orW > 44 {
+                        Text(String(format: "%.0f%%", orPct))
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.white)
+                            .offset(x: uvW + orW / 2 - 14)
+                    }
+                }
+            }
+            .frame(height: 36)
+
+            // Values row below bar
+            HStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Circle().fill(Color.orange).frame(width: 8, height: 8)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("UV synthesis").font(.caption2).foregroundColor(.secondary)
+                        Text(String(format: "+%.3f nmol/L", uvContrib))
+                            .font(.caption).fontWeight(.semibold).foregroundColor(.orange)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 6) {
+                    Circle().fill(Color.blue).frame(width: 8, height: 8)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Oral intake").font(.caption2).foregroundColor(.secondary)
+                        Text(String(format: "+%.3f nmol/L", oralContrib))
+                            .font(.caption).fontWeight(.semibold).foregroundColor(.blue)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("Total level").font(.caption2).foregroundColor(.secondary)
+                    Text(String(format: "%.1f nmol/L", total))
+                        .font(.caption).fontWeight(.semibold)
+                        .foregroundColor(total < 30 ? .red : total < 50 ? .orange : .green)
+                }
+            }
+
+            // Context note
+            HStack(spacing: 4) {
+                Image(systemName: uvPct > 60
+                    ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .font(.caption).foregroundColor(uvPct > 60 ? .green : .orange)
+                Text(uvPct > 60
+                     ? "UV dominant — matches literature (73–98%)"
+                     : "Oral dominant — possibly limited UV exposure recently")
+                    .font(.caption2)
+                    .foregroundColor(uvPct > 60 ? .green : .orange)
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(16)
+        .padding(.horizontal)
     }
 }

@@ -13,68 +13,16 @@ struct HistoryView: View {
         }
     }
 
-    var history: [(Date, Double)] {
-        store.plasmaHistory(days: daysToShow)
+    // Uses daily aggregates via store.longitudinalModel()
+    // so SED is correctly summed per day before running Eq. 8
+    var longitudinalData: [DataStore.DayModelResult] {
+        store.longitudinalModel(daysBack: daysToShow)
     }
-    
-    var longitudinalData: [(label: String,
-                            total: Double,
-                            uvContrib: Double,
-                            oralContrib: Double)] {
-        let cal   = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        var dayMap: [Date: DayReading] = [:]
-        for r in store.readings {
-            let day = cal.startOfDay(for: r.date)
-            dayMap[day] = r
-        }
-        guard let cutoff = cal.date(
-            byAdding: .day,
-            value: -(daysToShow - 1),
-            to: today) else { return [] }
-        let sorted = dayMap
-            .filter { $0.key >= cutoff }
-            .sorted { $0.key < $1.key }
-        guard !sorted.isEmpty else { return [] }
 
-        let uvDoses   = sorted.map { $0.value.sed }
-        let bsas      = sorted.map { $0.value.bsaPercent }
-        let oralDoses = sorted.map { $0.value.oralUg }
-        let n         = sorted.count
-
-        let totals = VitaminDEngine.runModel(
-            oralDoses: oralDoses, uvDoses: uvDoses,
-            bodyAreas: bsas,
-            age: store.profile.age,
-            skinType: store.profile.skinType,
-            C0: store.profile.initialLevel)
-
-        let uvOnly = VitaminDEngine.runModel(
-            oralDoses: Array(repeating: 0, count: n),
-            uvDoses: uvDoses, bodyAreas: bsas,
-            age: store.profile.age,
-            skinType: store.profile.skinType,
-            C0: store.profile.initialLevel)
-
-        let oralOnly = VitaminDEngine.runModel(
-            oralDoses: oralDoses,
-            uvDoses: Array(repeating: 0, count: n),
-            bodyAreas: bsas,
-            age: store.profile.age,
-            skinType: store.profile.skinType,
-            C0: store.profile.initialLevel)
-
-        return sorted.enumerated().map { i, pair in
-            let fmt = DateFormatter()
-            fmt.dateFormat = "M/d"
-            return (
-                label: fmt.string(from: pair.key),
-                total: totals[i],
-                uvContrib: max(0, uvOnly[i] -
-                    store.profile.initialLevel),
-                oralContrib: max(0, oralOnly[i] -
-                    store.profile.initialLevel))
-        }
+    var averagePlasma: Double {
+        guard !longitudinalData.isEmpty else { return 0 }
+        return longitudinalData.map { $0.total }.reduce(0,+)
+            / Double(longitudinalData.count)
     }
 
     var body: some View {
@@ -82,258 +30,215 @@ struct HistoryView: View {
             ScrollView {
                 VStack(spacing: 14) {
 
+                    Picker("Range", selection: $selectedRange) {
+                        ForEach(0..<ranges.count, id: \.self) {
+                            Text(ranges[$0]).tag($0)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
 
-                    if !history.isEmpty {
+                    // Summary cards
+                    if !longitudinalData.isEmpty {
                         HStack(spacing: 10) {
                             SummaryCard(
+                                label: "Latest",
+                                value: String(format: "%.1f",
+                                    longitudinalData.last?.total ?? 0),
+                                unit:  "nmol/L",
+                                color: levelColor(
+                                    longitudinalData.last?.total ?? 0))
+                            SummaryCard(
                                 label: "Average",
-                                value: String(format: "%.0f",
-                                    history.map { $0.1 }
-                                    .reduce(0,+) /
-                                    Double(history.count)),
+                                value: String(format: "%.1f",
+                                    averagePlasma),
                                 unit:  "nmol/L",
                                 color: .blue)
                             SummaryCard(
                                 label: "Days tracked",
-                                value: "\(history.count)",
+                                value: "\(longitudinalData.count)",
                                 unit:  "days",
                                 color: .purple)
                         }
                         .padding(.horizontal)
+
+                        // Total SED card
+                        let totalSED = store.readings
+                            .filter { $0.label == nil }
+                            .reduce(0) { $0 + $1.sed }
+                        SummaryCard(
+                            label: "Total UV dose",
+                            value: String(format: "%.4f", totalSED),
+                            unit:  "SED cumulative",
+                            color: .orange)
+                            .padding(.horizontal)
                     }
+
+                    // Day-by-day list — collapsible per date
                     if !longitudinalData.isEmpty {
-
-                        VStack(alignment: .leading,
-                               spacing: 0) {
-
-                            Text("All readings")
-                                .font(.headline)
-                                .padding()
+                        VStack(alignment: .leading, spacing: 0) {
                             HStack {
-                                Text("Date")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .frame(width: 40,
-                                           alignment: .leading)
-
+                                Text("All readings")
+                                    .font(.headline)
                                 Spacer()
                                 Text("UV contrib")
-                                    .font(.caption2)
-                                    .foregroundColor(.orange)
-                                Spacer()
-                                Text("Oral contrib")
-                                    .font(.caption2)
-                                    .foregroundColor(.blue)
-                                Spacer()
+                                    .font(.caption2).foregroundColor(.orange)
+                                    .frame(width: 64, alignment: .trailing)
+                                Text("Oral")
+                                    .font(.caption2).foregroundColor(.blue)
+                                    .frame(width: 44, alignment: .trailing)
                                 Text("C_total")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .frame(width: 70,
-                                           alignment: .trailing)
+                                    .font(.caption2).foregroundColor(.secondary)
+                                    .frame(width: 54, alignment: .trailing)
                             }
-                            .padding(.horizontal)
-                            .padding(.bottom, 8)
-                            ForEach(
-                                longitudinalData.indices,
-                                id: \.self
-                            ) { i in
+                            .padding(.horizontal).padding(.vertical, 10)
 
-                                let day = longitudinalData[i]
-
-                                let cal = Calendar.current
-
-                                let matchingReadings =
-                                    store.readings
-                                        .filter {
-                                            cal.isDate(
-                                                $0.date,
-                                                inSameDayAs:
-                                                    dateFromLabel(day.label)
-                                            )
-                                        }
-                                        .sorted {
-                                            $0.date > $1.date
-                                        }
-
-                                DisclosureGroup {
-
-                                    VStack(spacing: 0) {
-
-                                        ForEach(matchingReadings) { r in
-
-                                            HStack {
-
-                                                VStack(
-                                                    alignment: .leading,
-                                                    spacing: 3
-                                                ) {
-
-                                                    Text(
-                                                        r.date.formatted(
-                                                            .dateTime
-                                                                .month()
-                                                                .day()
-                                                                .hour()
-                                                                .minute()
-                                                        )
-                                                    )
-                                                    .font(.caption)
-                                                    .foregroundColor(
-                                                        .secondary
-                                                    )
-
-                                                    Text(
-                                                        String(
-                                                            format:
-                                                            "UVI %.1f · BSA %.0f%% · SED %.4f",
-                                                            r.uvi,
-                                                            r.bsaPercent,
-                                                            r.sed
-                                                        )
-                                                    )
-                                                    .font(.caption2)
-                                                    .foregroundColor(
-                                                        .secondary
-                                                    )
-                                                }
-
-                                                Spacer()
-
-                                                Text(
-                                                    String(
-                                                        format:
-                                                        "%.0f nmol/L",
-                                                        r.plasmaLevel
-                                                    )
-                                                )
-                                                .font(.subheadline)
-                                                .fontWeight(.semibold)
-                                                .foregroundColor(
-                                                    levelColor(
-                                                        r.plasmaLevel
-                                                    )
-                                                )
-                                            }
-                                            .padding(.horizontal)
-                                            .padding(.vertical, 8)
-
-                                            Divider()
-                                                .padding(.horizontal)
-                                        }
-                                    }
-
-                                } label: {
-
-                                    HStack {
-
-                                        Text(day.label)
-                                            .font(.caption2)
-                                            .foregroundColor(
-                                                .secondary
-                                            )
-                                            .frame(
-                                                width: 40,
-                                                alignment: .leading
-                                            )
-
-                                        Spacer()
-
-                                        Text(
-                                            String(
-                                                format:
-                                                "+%.2f",
-                                                day.uvContrib
-                                            )
-                                        )
-                                        .font(.caption2)
-                                        .foregroundColor(.orange)
-
-                                        Spacer()
-
-                                        Text(
-                                            String(
-                                                format:
-                                                "+%.2f",
-                                                day.oralContrib
-                                            )
-                                        )
-                                        .font(.caption2)
-                                        .foregroundColor(.blue)
-
-                                        Spacer()
-
-                                        Text(
-                                            String(
-                                                format:
-                                                "%.0f",
-                                                day.total
-                                            )
-                                        )
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                        .frame(
-                                            width: 70,
-                                            alignment: .trailing
-                                        )
-                                    }
-                                    .padding(.horizontal)
-                                    .padding(.vertical, 10)
-                                }
-
-                                Divider()
-                                    .padding(.horizontal)
+                            ForEach(longitudinalData, id: \.date) { day in
+                                DayHistoryRow(day: day)
+                                Divider().padding(.horizontal)
                             }
                         }
-                        .background(
-                            Color(.secondarySystemBackground)
-                        )
-                        .cornerRadius(16)
-                        .padding(.horizontal)
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(16).padding(.horizontal)
+                    } else {
+                        Text("No readings yet")
+                            .font(.caption).foregroundColor(.secondary)
+                            .padding(32)
                     }
-                    
                 }
                 .padding(.vertical)
             }
             .navigationTitle("History")
             .toolbar {
-                ToolbarItem(placement:
-                    .navigationBarTrailing) {
-                    Button("Clear today") {
-                        store.clearToday()
-                    }
-                    .foregroundColor(.red)
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Clear today") { store.clearToday() }
+                        .foregroundColor(.red)
                 }
             }
         }
     }
-    
-    func dateFromLabel(_ label: String) -> Date {
 
-        let fmt = DateFormatter()
-        fmt.dateFormat = "M/d"
-
-        let parsed =
-            fmt.date(from: label) ?? Date()
-
-        let currentYear =
-            Calendar.current.component(
-                .year,
-                from: Date()
-            )
-
-        var comps =
-            Calendar.current.dateComponents(
-                [.month, .day],
-                from: parsed
-            )
-
-        comps.year = currentYear
-
-        return Calendar.current.date(
-            from: comps
-        ) ?? Date()
+    func levelColor(_ v: Double) -> Color {
+        v < 30 ? .red : v < 50 ? .orange : .green
     }
-    
+}
+
+// ── Day history row ───────────────────────────────────────────
+struct DayHistoryRow: View {
+    @EnvironmentObject var store: DataStore
+    let day: DataStore.DayModelResult
+
+    var readingsForDay: [DayReading] {
+        let cal = Calendar.current
+        return store.readings
+            .filter { cal.isDate($0.date, inSameDayAs: day.date) }
+            .sorted { $0.date > $1.date }
+    }
+
+    var foodForDay: [FoodLogEntry] {
+        let cal = Calendar.current
+        return store.foodLog
+            .filter { cal.isDate($0.date, inSameDayAs: day.date) }
+            .sorted { $0.date > $1.date }
+    }
+
+    var body: some View {
+        DisclosureGroup {
+            VStack(spacing: 0) {
+
+                // Diet entries at top
+                if !foodForDay.isEmpty {
+                    VStack(spacing: 0) {
+                        HStack {
+                            Text("Diet vitamin D")
+                                .font(.caption).fontWeight(.semibold)
+                                .foregroundColor(.blue)
+                            Spacer()
+                            Text(String(format: "%.1f µg total",
+                                foodForDay.reduce(0) { $0 + $1.vitaminDug }))
+                                .font(.caption2).foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal).padding(.vertical, 6)
+
+                        ForEach(foodForDay) { entry in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(entry.name)
+                                        .font(.caption).fontWeight(.medium)
+                                    Text(entry.brand.isEmpty
+                                         ? entry.servingDesc
+                                         : "\(entry.brand) · \(entry.servingDesc)")
+                                        .font(.caption2).foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Text(String(format: "+%.1f µg", entry.vitaminDug))
+                                    .font(.caption).foregroundColor(.blue)
+                            }
+                            .padding(.horizontal).padding(.vertical, 5)
+                            Divider().padding(.horizontal)
+                        }
+                    }
+                    .background(Color.blue.opacity(0.04))
+                }
+
+                // UV readings in reverse chronological order
+                ForEach(readingsForDay) { r in
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 4) {
+                                Text(r.date.formatted(
+                                    .dateTime.hour().minute()))
+                                    .font(.caption2).foregroundColor(.secondary)
+                                if r.label != nil {
+                                    Text("● manual")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.purple)
+                                }
+                                if r.isUncertain {
+                                    Text("⚠ uncertain")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.orange)
+                                }
+                            }
+                            Text(String(format:
+                                "UVI %.1f · BSA %.0f%% · SED %.5f · %@",
+                                r.uvi, r.bsaPercent, r.sed,
+                                r.indoors ? "indoors" : "outdoors"))
+                                .font(.caption2).foregroundColor(.secondary)
+                            if let label = r.label {
+                                Text(""\(label)"")
+                                    .font(.caption2).foregroundColor(.purple)
+                            }
+                        }
+                        Spacer()
+                        Text(String(format: "%.1f nmol/L", r.plasmaLevel))
+                            .font(.caption).fontWeight(.semibold)
+                            .foregroundColor(levelColor(r.plasmaLevel))
+                    }
+                    .padding(.horizontal).padding(.vertical, 8)
+                    Divider().padding(.horizontal)
+                }
+            }
+        } label: {
+            HStack {
+                Text(day.label)
+                    .font(.caption2).foregroundColor(.secondary)
+                    .frame(width: 40, alignment: .leading)
+                Spacer()
+                Text(String(format: "+%.3f", day.uvContrib))
+                    .font(.caption2).foregroundColor(.orange)
+                    .frame(width: 64, alignment: .trailing)
+                Text(String(format: "+%.3f", day.oralContrib))
+                    .font(.caption2).foregroundColor(.blue)
+                    .frame(width: 44, alignment: .trailing)
+                Text(String(format: "%.1f", day.total))
+                    .font(.caption2).foregroundColor(levelColor(day.total))
+                    .frame(width: 54, alignment: .trailing)
+            }
+            .padding(.horizontal).padding(.vertical, 10)
+        }
+    }
+
     func levelColor(_ v: Double) -> Color {
         v < 30 ? .red : v < 50 ? .orange : .green
     }
@@ -345,93 +250,13 @@ struct SummaryCard: View {
     let value: String
     let unit:  String
     let color: Color
-
     var body: some View {
         VStack(spacing: 3) {
-            Text(label)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-            Text(value)
-                .font(.title2)
-                .fontWeight(.bold)
-                .foregroundColor(color)
-            Text(unit)
-                .font(.caption2)
-                .foregroundColor(.secondary)
+            Text(label).font(.caption2).foregroundColor(.secondary)
+            Text(value).font(.title2).fontWeight(.bold).foregroundColor(color)
+            Text(unit).font(.caption2).foregroundColor(.secondary)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(Color(.tertiarySystemBackground))
-        .cornerRadius(12)
-    }
-}
-
-// ── Bar chart ─────────────────────────────────────────────────
-struct PlasmaChart: View {
-    let data: [(Date, Double)]
-
-    var maxVal: Double {
-        max(80, data.map { $0.1 }.max() ?? 80)
-    }
-
-    var body: some View {
-        VStack(spacing: 6) {
-            HStack {
-                Text("50 nmol/L — sufficient")
-                    .font(.system(size: 9))
-                    .foregroundColor(.green)
-                Spacer()
-                Text("30 nmol/L — deficient")
-                    .font(.system(size: 9))
-                    .foregroundColor(.red)
-            }
-            GeometryReader { geo in
-                ZStack(alignment: .bottomLeading) {
-                    Rectangle()
-                        .fill(Color.green.opacity(0.3))
-                        .frame(height: 1)
-                        .offset(y: -(geo.size.height *
-                            CGFloat(50 / maxVal)))
-                    Rectangle()
-                        .fill(Color.red.opacity(0.3))
-                        .frame(height: 1)
-                        .offset(y: -(geo.size.height *
-                            CGFloat(30 / maxVal)))
-                    HStack(alignment: .bottom, spacing: 4) {
-                        ForEach(data.indices,
-                                id: \.self) { i in
-                            let (date, level) = data[i]
-                            VStack(spacing: 2) {
-                                Text(String(format: "%.0f",
-                                            level))
-                                    .font(.system(size: 8))
-                                    .foregroundColor(
-                                        .secondary)
-                                RoundedRectangle(
-                                    cornerRadius: 3)
-                                    .fill(barColor(level))
-                                    .frame(height: max(4,
-                                        geo.size.height *
-                                        CGFloat(level / maxVal)
-                                        - 16))
-                                Text(date.formatted(
-                                    .dateTime
-                                    .month(.abbreviated)
-                                    .day()))
-                                    .font(.system(size: 8))
-                                    .foregroundColor(
-                                        .secondary)
-                                    .lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    func barColor(_ v: Double) -> Color {
-        v < 30 ? .red : v < 50 ? .orange : .green
+        .frame(maxWidth: .infinity).padding(.vertical, 10)
+        .background(Color(.tertiarySystemBackground)).cornerRadius(12)
     }
 }

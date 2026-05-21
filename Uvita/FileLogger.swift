@@ -10,7 +10,7 @@ struct FileLogger {
 
     static func setup() {
         guard let base = uvitaDir else { return }
-        let folders = ["UVlogs", "Diet", "VitaminD", "Corrections"]
+        let folders = ["UVlogs", "Diet", "VitaminD", "Corrections", "LabeledReadings"]
         for folder in folders {
             let url = base.appendingPathComponent(folder)
             try? FileManager.default
@@ -21,12 +21,20 @@ struct FileLogger {
 
     static func log(reading: DayReading) {
         setup()
-        logUV(reading)
-        logVitaminD(reading)
+        if reading.label != nil {
+            // Manual Log Now reading — goes only to labeled_readings.csv.
+            // Kept out of UVlogs/VitaminD so those files remain a clean
+            // passive background sensor stream for evaluation.
+            logLabeled(reading)
+        } else {
+            // Automatic 5-min reading — goes to UVlogs + VitaminD only.
+            logUV(reading)
+            logVitaminD(reading)
+        }
     }
 
     // UVlogs/YYYY-MM-DD_uv.csv
-    // Now includes smoothed_uvi column so you can see
+    // Now includes uvi column so you can see
     // the rolling-average value that was actually used
     static func logUV(_ r: DayReading) {
         guard let dir = uvitaDir else { return }
@@ -34,10 +42,10 @@ struct FileLogger {
             .appendingPathComponent("UVlogs")
             .appendingPathComponent("\(dayString(r.date))_uv.csv")
 
-        let header = "timestamp,smoothed_uvi,interval_hours,sed," +
-            "bsa_pct,clothing,indoors," +
-            "sed_head,sed_hands,sed_forearms," +
-            "sed_upper_arms,sed_lower_legs," +
+        let header = "timestamp,uvi,interval_hours,sed," +
+            "bsa_pct,clothing,indoors,uncertain," +
+            "sed_head,sed_neck,sed_upper_arms,sed_forearms," +
+            "sed_hands,sed_torso,sed_upper_legs,sed_lower_legs\\n"
             "sed_upper_legs,sed_torso\n"
 
         let bp = r.bodyPartSED
@@ -46,10 +54,11 @@ struct FileLogger {
             "\(r.sed),\(r.bsaPercent)," +
             "\"\(r.clothingName)\"," +
             "\(r.indoors ? 1 : 0)," +
-            "\(bp.head),\(bp.hands)," +
-            "\(bp.forearms),\(bp.upperArms)," +
-            "\(bp.lowerLegs),\(bp.upperLegs)," +
-            "\(bp.torso)\n"
+            "\(r.isUncertain ? 1 : 0)," +
+            "\(bp.head),\(bp.neck)," +
+            "\(bp.upperArms),\(bp.forearms)," +
+            "\(bp.hands),\(bp.torso)," +
+            "\(bp.upperLegs),\(bp.lowerLegs)\n"
 
         appendToFile(url: file, header: header, row: row)
     }
@@ -61,7 +70,7 @@ struct FileLogger {
             .appendingPathComponent("VitaminD")
             .appendingPathComponent("\(dayString(r.date))_vitamind.csv")
 
-        let header = "timestamp,plasma_nmol_l,sed,oral_ug,bsa_pct,smoothed_uvi\n"
+        let header = "timestamp,plasma_nmol_l,sed,oral_ug,bsa_pct,uvi\n"
         let row    = "\(iso(r.date)),\(r.plasmaLevel),\(r.sed)," +
                      "\(r.oralUg),\(r.bsaPercent),\(r.uvi)\n"
 
@@ -90,21 +99,57 @@ struct FileLogger {
                                lat: Double, lon: Double,
                                accuracy: Double,
                                autoDetected: Bool,
-                               userSet: Bool) {
+                               userSet: Bool,
+                               uvi: Double,
+                               sed: Double) {
         guard let dir = uvitaDir else { return }
         setup()
         let file = dir
             .appendingPathComponent("Corrections")
             .appendingPathComponent("corrections.csv")
 
+        // Self-contained — no need to cross-reference UVlogs.
+        // uvi/sed are the corrected values that went into the model
+        // (0 if user set indoors, actual UVI if user set outdoors).
         let header = "timestamp,lat,lon,gps_accuracy_m," +
-                     "auto_detected_indoor,user_set_indoor,was_wrong\n"
+                     "auto_detected_indoor,user_set_indoor," +
+                     "was_wrong,corrected_uvi,corrected_sed\n"
         let wasWrong = autoDetected != userSet
         let row = "\(iso(date))," +
                   "\(lat),\(lon),\(accuracy)," +
                   "\(autoDetected ? 1 : 0)," +
                   "\(userSet ? 1 : 0)," +
-                  "\(wasWrong ? 1 : 0)\n"
+                  "\(wasWrong ? 1 : 0)," +
+                  "\(uvi),\(sed)\n"
+
+        appendToFile(url: file, header: header, row: row)
+    }
+
+    // LabeledReadings/labeled_readings.csv — one global file.
+    // Written only for manual "Log now" readings that have a label.
+    // Contains full snapshot: label, GPS, all model inputs/outputs.
+    // Primary dataset for ground-truth indoor/outdoor evaluation.
+    static func logLabeled(_ r: DayReading) {
+        guard let dir = uvitaDir,
+              let label = r.label else { return }
+        let file = dir
+            .appendingPathComponent("LabeledReadings")
+            .appendingPathComponent("labeled_readings.csv")
+
+        let header = "timestamp,label,lat,lon,gps_accuracy_m," +
+                     "indoors,uncertain,uvi,sed," +
+                     "bsa_pct,clothing,plasma_nmol_l,oral_ug
+"
+        let row = "\(iso(r.date))," +
+                  ""\(label)"," +
+                  "\(r.lat),\(r.lon),\(r.gpsAccuracy)," +
+                  "\(r.indoors ? 1 : 0)," +
+                  "\(r.isUncertain ? 1 : 0)," +
+                  "\(r.uvi),\(r.sed)," +
+                  "\(r.bsaPercent)," +
+                  ""\(r.clothingName)"," +
+                  "\(r.plasmaLevel),\(r.oralUg)
+"
 
         appendToFile(url: file, header: header, row: row)
     }
