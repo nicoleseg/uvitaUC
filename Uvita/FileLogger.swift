@@ -138,18 +138,16 @@ struct FileLogger {
 
         let header = "timestamp,label,lat,lon,gps_accuracy_m," +
                      "indoors,uncertain,uvi,sed," +
-                     "bsa_pct,clothing,plasma_nmol_l,oral_ug
-"
+                     "bsa_pct,clothing,plasma_nmol_l,oral_ug\n"
         let row = "\(iso(r.date))," +
-                  ""\(label)"," +
+                  "\"\(label)\"," +
                   "\(r.lat),\(r.lon),\(r.gpsAccuracy)," +
                   "\(r.indoors ? 1 : 0)," +
                   "\(r.isUncertain ? 1 : 0)," +
                   "\(r.uvi),\(r.sed)," +
                   "\(r.bsaPercent)," +
-                  ""\(r.clothingName)"," +
-                  "\(r.plasmaLevel),\(r.oralUg)
-"
+                  "\"\(r.clothingName)\"," +
+                  "\(r.plasmaLevel),\(r.oralUg)\n"
 
         appendToFile(url: file, header: header, row: row)
     }
