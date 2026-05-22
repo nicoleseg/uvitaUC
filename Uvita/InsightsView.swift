@@ -31,7 +31,7 @@ struct InsightsView: View {
     }
 
     // Projection window — uses daily aggregates too
-    private struct ProjDay {
+    struct ProjDay {
         let uvDose:   Double
         let oralDose: Double
         let bsa:      Double
@@ -137,7 +137,7 @@ struct InsightsView: View {
                                     .frame(height: 220).padding(.horizontal)
                             }
                             .padding(.vertical)
-                            .background(Color(UIColor.secondarySystemBackground))
+                            .background(Color.gray.opacity(0.1))
                             .cornerRadius(16).padding(.horizontal)
                         }
 
@@ -171,7 +171,7 @@ struct InsightsView: View {
                                                 .padding(.horizontal, 12).padding(.vertical, 6)
                                                 .background(projectionWindow == days
                                                     ? Color.blue
-                                                    : Color(UIColor.tertiarySystemBackground))
+                                                    : Color.gray.opacity(0.06))
                                                 .foregroundColor(projectionWindow == days
                                                     ? .white : .primary)
                                                 .cornerRadius(8)
@@ -231,7 +231,7 @@ struct InsightsView: View {
                             }
                         }
                         .padding(.vertical)
-                        .background(Color(UIColor.secondarySystemBackground))
+                        .background(Color.gray.opacity(0.1))
                         .cornerRadius(16).padding(.horizontal)
                     }
                 }
@@ -256,7 +256,7 @@ struct StatMiniCard: View {
             Text(value).font(.subheadline).fontWeight(.bold).foregroundColor(color)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 8)
-        .background(Color(UIColor.tertiarySystemBackground)).cornerRadius(10)
+        .background(Color.gray.opacity(0.06)).cornerRadius(10)
     }
 }
 
@@ -496,7 +496,7 @@ struct CombinedContributionCard: View {
             }
         }
         .padding()
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(Color.gray.opacity(0.1))
         .cornerRadius(16)
         .padding(.horizontal)
     }
