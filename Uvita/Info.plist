@@ -10,6 +10,8 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>UVita needs your location to estimate UV exposure and vitamin D</string>
+	<key>NSMotionUsageDescription</key>
+	<string>UVita uses motion data to flag uncertain GPS readings for evaluation purposes</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>UVita needs your location to estimate UV exposure and vitamin D</string>
 	<key>UIBackgroundModes</key>

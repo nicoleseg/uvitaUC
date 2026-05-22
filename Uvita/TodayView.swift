@@ -950,13 +950,21 @@ struct FoodItem: Identifiable {
 
 struct FoodSearchService {
 
-    // Search Open Food Facts first, fall back to USDA FoodData Central
+    // Search order:
+    // 1. Local curated database — USDA-sourced, always has vitamin D values
+    // 2. USDA FoodData Central API — lab-tested, reliable vitamin D
+    // 3. Open Food Facts — fallback, often missing vitamin D
     static func search(query: String) async throws -> [FoodItem] {
-        var items = try await searchOpenFoodFacts(query: query)
-        if items.isEmpty {
-            items = try await searchUSDA(query: query)
-        }
-        return items
+        // Local DB first — instant, no network, accurate vitamin D values
+        let local = VitaminDFoodDatabase.searchAsFoodItems(query: query)
+        if !local.isEmpty { return local }
+
+        // USDA next — best API for vitamin D
+        let usda = try await searchUSDA(query: query)
+        if !usda.isEmpty { return usda }
+
+        // Open Food Facts last — often 0.0 for vitamin D but better than nothing
+        return try await searchOpenFoodFacts(query: query)
     }
 
     // Barcode lookup — Open Food Facts by barcode
