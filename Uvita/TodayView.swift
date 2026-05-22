@@ -98,7 +98,7 @@ struct GPSStatusCard: View {
                                 .font(.caption)
                         }
                         .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Color(UIColor.tertiarySystemBackground))
+                        .background(Color.gray.opacity(0.06))
                         .foregroundColor(.primary)
                         .cornerRadius(8)
                     }
@@ -114,7 +114,7 @@ struct GPSStatusCard: View {
             }
         }
         .padding()
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(Color.gray.opacity(0.1))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -150,7 +150,7 @@ struct TrackingToggleCard: View {
             }
         }
         .padding()
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(Color.gray.opacity(0.1))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -226,7 +226,7 @@ struct PlasmaCard: View {
             }
         }
         .frame(maxWidth: .infinity).padding()
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(Color.gray.opacity(0.1))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -288,7 +288,7 @@ struct DailyTotalCard: View {
             }
         }
         .padding()
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(Color.gray.opacity(0.1))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -332,7 +332,7 @@ struct TodayLogCard: View {
             }
         }
         .padding(.vertical)
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(Color.gray.opacity(0.1))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -380,7 +380,7 @@ struct FoodSourceCard: View {
                             .font(.caption).foregroundColor(.secondary)
                     }
                     .padding(12)
-                    .background(Color(UIColor.tertiarySystemBackground))
+                    .background(Color.gray.opacity(0.06))
                     .cornerRadius(10)
                 }
             } else {
@@ -397,7 +397,7 @@ struct FoodSourceCard: View {
                     }
                 }
                 .padding(12)
-                .background(Color(UIColor.tertiarySystemBackground)).cornerRadius(10)
+                .background(Color.gray.opacity(0.06)).cornerRadius(10)
             }
 
             // If manualLog, show today's food entries + button
@@ -426,7 +426,7 @@ struct FoodSourceCard: View {
                         }
                     }
                     .padding(8)
-                    .background(Color(UIColor.tertiarySystemBackground)).cornerRadius(10)
+                    .background(Color.gray.opacity(0.06)).cornerRadius(10)
                 }
 
                 Button { showFoodLog = true } label: {
@@ -439,12 +439,12 @@ struct FoodSourceCard: View {
                             .font(.caption).foregroundColor(.secondary)
                     }
                     .padding(12)
-                    .background(Color(UIColor.tertiarySystemBackground)).cornerRadius(10)
+                    .background(Color.gray.opacity(0.06)).cornerRadius(10)
                 }
             }
         }
         .padding()
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(Color.gray.opacity(0.1))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -589,7 +589,7 @@ struct SupplementCard: View {
             }
         }
         .padding()
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(Color.gray.opacity(0.1))
         .cornerRadius(16).padding(.horizontal)
         .onAppear {
             iuText = store.profile.oralIU == 0
@@ -631,13 +631,13 @@ struct ClothingCard: View {
                     .padding(10)
                     .background(store.profile.clothing == opt
                         ? Color.blue.opacity(0.08)
-                        : Color(UIColor.tertiarySystemBackground))
+                        : Color.gray.opacity(0.06))
                     .cornerRadius(10)
                 }
             }
         }
         .padding()
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(Color.gray.opacity(0.1))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -673,7 +673,7 @@ struct FoodLogView: View {
                         }
                     }
                     .padding(10)
-                    .background(Color(UIColor.secondarySystemBackground))
+                    .background(Color.gray.opacity(0.1))
                     .cornerRadius(10)
 
                     Button {
@@ -744,7 +744,7 @@ struct FoodLogView: View {
                                 .font(.subheadline).fontWeight(.bold).foregroundColor(.blue)
                         }.padding()
                     }
-                    .background(Color(UIColor.secondarySystemBackground))
+                    .background(Color.gray.opacity(0.1))
                 }
             }
             .navigationTitle("Log Food")
@@ -962,7 +962,7 @@ struct FoodSearchService {
     // Barcode lookup — Open Food Facts by barcode
     static func lookup(barcode: String) async throws -> FoodItem? {
         let url  = URL(string:
-            "https://world.openfoodfacts.org/api/v0/product/\(barcode).json")!
+            "https://us.openfoodfacts.org/api/v0/product/\(barcode).json")!
         let (data, _) = try await URLSession.shared.data(from: url)
         let json = try JSONSerialization.jsonObject(with: data)
             as! [String: Any]
@@ -982,6 +982,8 @@ struct FoodSearchService {
             .init(name: "action",        value: "process"),
             .init(name: "json",          value: "1"),
             .init(name: "page_size",     value: "20"),
+            .init(name: "lc",            value: "en"),
+            .init(name: "cc",            value: "us"),
             .init(name: "fields",
                   value: "product_name,brands,nutriments,serving_size,quantity")
         ]
@@ -1125,12 +1127,12 @@ struct LogNowCard: View {
                     }
                 }
                 .padding(10)
-                .background(Color(UIColor.tertiarySystemBackground))
+                .background(Color.gray.opacity(0.06))
                 .cornerRadius(10)
             }
         }
         .padding()
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(Color.gray.opacity(0.1))
         .cornerRadius(16).padding(.horizontal)
     }
 }
@@ -1206,7 +1208,7 @@ struct LogNowSheet: View {
                                             .padding(.vertical, 6)
                                             .background(labelText == s
                                                 ? Color.blue
-                                                : Color(UIColor.tertiarySystemBackground))
+                                                : Color.gray.opacity(0.06))
                                             .foregroundColor(labelText == s
                                                 ? .white : .primary)
                                             .cornerRadius(8)
@@ -1239,7 +1241,7 @@ struct LogNowSheet: View {
                                             && location.accuracy > 25))
                                         ? "Yes" : "No")
                         }
-                        .background(Color(UIColor.tertiarySystemBackground))
+                        .background(Color.gray.opacity(0.06))
                         .cornerRadius(10)
                         .padding(.horizontal)
                     }
@@ -1267,7 +1269,7 @@ struct LogNowSheet: View {
                                 DataRow(label: "Saved to",
                                         value: "LabeledReadings/labeled_readings.csv")
                             }
-                            .background(Color(UIColor.tertiarySystemBackground))
+                            .background(Color.gray.opacity(0.06))
                             .cornerRadius(10)
                             .padding(.horizontal)
                         }
