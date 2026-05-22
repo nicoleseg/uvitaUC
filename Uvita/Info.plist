@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleIdentifier</key>
-	<string></string>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>UIFileSharingEnabled</key>
@@ -14,6 +14,8 @@
 	<string>UVita uses motion data to flag uncertain GPS readings for evaluation purposes</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>UVita needs your location to estimate UV exposure and vitamin D</string>
+	<key>NSCameraUsageDescription</key>
+	<string>UVita uses the camera to scan food barcodes for vitamin D intake logging.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
