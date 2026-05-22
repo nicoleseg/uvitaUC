@@ -13,8 +13,6 @@ struct HistoryView: View {
         }
     }
 
-    // Uses daily aggregates via store.longitudinalModel()
-    // so SED is correctly summed per day before running Eq. 8
     var longitudinalData: [DataStore.DayModelResult] {
         store.longitudinalModel(daysBack: daysToShow)
     }
@@ -38,7 +36,6 @@ struct HistoryView: View {
                     .pickerStyle(.segmented)
                     .padding(.horizontal)
 
-                    // Summary cards
                     if !longitudinalData.isEmpty {
                         HStack(spacing: 10) {
                             SummaryCard(
@@ -50,8 +47,7 @@ struct HistoryView: View {
                                     longitudinalData.last?.total ?? 0))
                             SummaryCard(
                                 label: "Average",
-                                value: String(format: "%.1f",
-                                    averagePlasma),
+                                value: String(format: "%.1f", averagePlasma),
                                 unit:  "nmol/L",
                                 color: .blue)
                             SummaryCard(
@@ -62,7 +58,6 @@ struct HistoryView: View {
                         }
                         .padding(.horizontal)
 
-                        // Total SED card
                         let totalSED = store.readings
                             .filter { $0.label == nil }
                             .reduce(0) { $0 + $1.sed }
@@ -74,7 +69,6 @@ struct HistoryView: View {
                             .padding(.horizontal)
                     }
 
-                    // Day-by-day list — collapsible per date
                     if !longitudinalData.isEmpty {
                         VStack(alignment: .leading, spacing: 0) {
                             HStack {
@@ -98,7 +92,7 @@ struct HistoryView: View {
                                 Divider().padding(.horizontal)
                             }
                         }
-                        .background(Color(.secondarySystemBackground))
+                        .background(Color.secondaryBackground)
                         .cornerRadius(16).padding(.horizontal)
                     } else {
                         Text("No readings yet")
@@ -123,7 +117,6 @@ struct HistoryView: View {
     }
 }
 
-// ── Day history row ───────────────────────────────────────────
 struct DayHistoryRow: View {
     @EnvironmentObject var store: DataStore
     let day: DataStore.DayModelResult
@@ -146,7 +139,6 @@ struct DayHistoryRow: View {
         DisclosureGroup {
             VStack(spacing: 0) {
 
-                // Diet entries at top
                 if !foodForDay.isEmpty {
                     VStack(spacing: 0) {
                         HStack {
@@ -181,7 +173,6 @@ struct DayHistoryRow: View {
                     .background(Color.blue.opacity(0.04))
                 }
 
-                // UV readings in reverse chronological order
                 ForEach(readingsForDay) { r in
                     HStack(spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -195,7 +186,7 @@ struct DayHistoryRow: View {
                                         .foregroundColor(.purple)
                                 }
                                 if r.isUncertain {
-                                    Text("⚠ uncertain")
+                                    Text("uncertain")
                                         .font(.system(size: 9))
                                         .foregroundColor(.orange)
                                 }
@@ -244,7 +235,6 @@ struct DayHistoryRow: View {
     }
 }
 
-// ── Summary card ──────────────────────────────────────────────
 struct SummaryCard: View {
     let label: String
     let value: String
@@ -257,6 +247,6 @@ struct SummaryCard: View {
             Text(unit).font(.caption2).foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 10)
-        .background(Color(.tertiarySystemBackground)).cornerRadius(12)
+        .background(Color.tertiaryBackground).cornerRadius(12)
     }
 }
