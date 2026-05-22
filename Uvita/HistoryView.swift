@@ -206,6 +206,7 @@ struct DayHistoryRow: View {
                                 r.indoors ? "indoors" : "outdoors"))
                                 .font(.caption2).foregroundColor(.secondary)
                             if let label = r.label {
+                                Text("Label: \(label)")
                                     .font(.caption2).foregroundColor(.purple)
                             }
                         }
