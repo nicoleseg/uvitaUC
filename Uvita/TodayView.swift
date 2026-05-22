@@ -699,8 +699,8 @@ struct FoodLogView: View {
                     Spacer()
                 } else {
                     List(results) { item in
-                        FoodItemRow(item: item) {
-                            addFood(item)
+                        FoodItemRow(item: item) { finalUg in
+                            addFood(item, finalUg: finalUg)
                         }
                     }
                     .listStyle(.plain)
@@ -806,11 +806,11 @@ struct FoodLogView: View {
         }
     }
 
-    func addFood(_ item: FoodItem) {
+    func addFood(_ item: FoodItem, finalUg: Double) {
         let entry = FoodLogEntry(
             name:        item.name,
             brand:       item.brand,
-            vitaminDug:  item.vitaminDug,
+            vitaminDug:  finalUg,
             servingDesc: item.servingDesc,
             date:        Date())
         store.addFoodLog(entry)
@@ -822,8 +822,9 @@ struct FoodLogView: View {
 }
 
 struct FoodItemRow: View {
-    let item: FoodItem
-    let onAdd: () -> Void
+    let item:  FoodItem
+    let onAdd: (Double) -> Void   // passes final µg after multiplier
+    @State private var showServingSheet = false
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
@@ -839,13 +840,176 @@ struct FoodItemRow: View {
                 Text(String(format: "%.0f IU", item.vitaminDug * 40))
                     .font(.caption2).foregroundColor(.secondary)
             }
-            Button(action: onAdd) {
+            Button {
+                showServingSheet = true
+            } label: {
                 Image(systemName: "plus.circle.fill")
                     .font(.title2).foregroundColor(.blue)
             }
             .buttonStyle(.plain)
         }
         .padding(.vertical, 4)
+        .sheet(isPresented: $showServingSheet) {
+            ServingPickerSheet(item: item) { finalUg in
+                onAdd(finalUg)
+                showServingSheet = false
+            }
+        }
+    }
+}
+
+// ── Serving picker sheet ──────────────────────────────────────
+struct ServingPickerSheet: View {
+    let item:   FoodItem
+    let onAdd:  (Double) -> Void
+
+    @State private var multiplier: Double = 1.0
+    @State private var customText = ""
+    @State private var useCustom  = false
+    @Environment(\.dismiss) var dismiss
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil, from: nil, for: nil)
+    }
+
+    var finalUg: Double {
+        if useCustom, let val = Double(customText), val > 0 {
+            return item.vitaminDug * val
+        }
+        return item.vitaminDug * multiplier
+    }
+
+    var finalIU: Double { finalUg * 40 }
+
+    let quickMultipliers: [(label: String, value: Double)] = [
+        ("0.5x", 0.5), ("1x", 1.0), ("1.5x", 1.5),
+        ("2x", 2.0), ("3x", 3.0)
+    ]
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                // Food info header
+                VStack(spacing: 6) {
+                    Text(item.name)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                    if !item.brand.isEmpty {
+                        Text(item.brand)
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                    Text("Base serving: \(item.servingDesc)")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(Color.secondaryBackground)
+
+                ScrollView {
+                    VStack(spacing: 20) {
+
+                        // Quick multiplier buttons
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("How many servings?")
+                                .font(.subheadline).fontWeight(.semibold)
+                                .padding(.horizontal)
+                            HStack(spacing: 8) {
+                                ForEach(quickMultipliers, id: \.value) { opt in
+                                    Button {
+                                        multiplier  = opt.value
+                                        useCustom   = false
+                                        customText  = ""
+                                        dismissKeyboard()
+                                    } label: {
+                                        Text(opt.label)
+                                            .font(.subheadline).fontWeight(.semibold)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 10)
+                                            .background(!useCustom && multiplier == opt.value
+                                                ? Color.blue
+                                                : Color.tertiaryBackground)
+                                            .foregroundColor(!useCustom && multiplier == opt.value
+                                                ? .white : .primary)
+                                            .cornerRadius(10)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+
+                        // Custom amount
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Or enter custom multiplier")
+                                .font(.subheadline).fontWeight(.semibold)
+                                .padding(.horizontal)
+                            HStack {
+                                TextField("e.g. 2.5", text: $customText)
+                                    .keyboardType(.decimalPad)
+                                    .textFieldStyle(.roundedBorder)
+                                    .onChange(of: customText) {
+                                        useCustom = !customText.isEmpty
+                                    }
+                                    .toolbar {
+                                        ToolbarItemGroup(placement: .keyboard) {
+                                            Spacer()
+                                            Button("Done") { dismissKeyboard() }
+                                        }
+                                    }
+                                Text("× serving")
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal)
+                            Text("e.g. enter 2.5 for 2.5 × \(item.servingDesc)")
+                                .font(.caption2).foregroundColor(.secondary)
+                                .padding(.horizontal)
+                        }
+
+                        // Live result
+                        VStack(spacing: 6) {
+                            Text("You will log")
+                                .font(.caption).foregroundColor(.secondary)
+                            Text(String(format: "%.2f µg", finalUg))
+                                .font(.system(size: 42, weight: .black))
+                                .foregroundColor(.blue)
+                            Text(String(format: "%.0f IU  ·  %.1f × \(item.servingDesc)",
+                                finalIU,
+                                useCustom ? (Double(customText) ?? 1.0) : multiplier))
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.secondaryBackground)
+                        .cornerRadius(16)
+                        .padding(.horizontal)
+
+                        // Add button
+                        Button {
+                            onAdd(finalUg)
+                        } label: {
+                            Text("Add to food log")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(finalUg > 0 ? Color.blue : Color.gray)
+                                .foregroundColor(.white)
+                                .cornerRadius(12)
+                        }
+                        .disabled(finalUg <= 0)
+                        .padding(.horizontal)
+                    }
+                    .padding(.vertical)
+                }
+            }
+            .navigationTitle("Add Food")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
     }
 }
 
