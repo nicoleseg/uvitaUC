@@ -423,6 +423,7 @@ class DataStore: ObservableObject {
         })
 
         let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
         var recovered = 0
 
         for file in files {
@@ -536,275 +537,73 @@ class DataStore: ObservableObject {
             .filter({ $0.pathExtension == "csv" })
             .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
         else {
-            print("Recovery: no Diet CSVs found")
+            print("Recovery: Diet folder not found")
             return
         }
 
-        let iso = ISO8601DateFormatter()
+        print("Recovery: found \(files.count) diet CSV files")
+
+        // Use DateFormatter with explicit format — more reliable than ISO8601DateFormatter
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = TimeZone(secondsFromGMT: 0)
+
+        // Existing timestamps to avoid duplicates
+        let existingTS = Set(foodLog.map { fmt.string(from: $0.date) })
+
         var recovered = 0
 
-        // Existing food log entry timestamps to avoid duplicates
-        let existingTimestamps = Set(foodLog.map {
-            iso.string(from: $0.date)
-        })
-
         for file in files {
-            guard let content = try? String(
-                contentsOf: file, encoding: .utf8) else { continue }
+            guard let content = try? String(contentsOf: file,
+                encoding: .utf8) else {
+                print("Recovery: could not read \(file.lastPathComponent)")
+                continue
+            }
 
-            // Parse CSV with proper quoted field handling
-            // Food names contain commas (e.g. "Salmon, Atlantic, wild")
-            // so simple split(",") fails — use parseCSV instead
             let rows = parseCSV(content)
-            guard rows.count > 1 else { continue }
+            print("Recovery: \(file.lastPathComponent) — \(rows.count - 1) rows")
 
             for row in rows.dropFirst() {
-                guard row.count >= 5 else { continue }
-                let tsStr = row[0].trimmingCharacters(in: .whitespaces)
-                guard let date = iso.date(from: tsStr) else { continue }
-                if existingTimestamps.contains(tsStr) { continue }
+                guard row.count >= 4 else { continue }
 
-                let name  = row[1]
-                let brand = row[2]
-                let vitD  = Double(row[3]) ?? 0.0
-                let serv  = row[4]
-                guard vitD > 0 else { continue }
+                let tsStr = row[0].trimmingCharacters(in: .whitespaces)
+                guard let date = fmt.date(from: tsStr) else {
+                    print("Recovery: bad date: \(tsStr)")
+                    continue
+                }
+                guard !existingTS.contains(tsStr) else { continue }
+
+                let name = row[1].trimmingCharacters(in: .whitespaces)
+                let brand = row.count > 2
+                    ? row[2].trimmingCharacters(in: .whitespaces) : ""
+                guard let vitD = Double(
+                    row[3].trimmingCharacters(in: .whitespaces)),
+                    vitD >= 0 else { continue }
+                let serv = row.count > 4
+                    ? row[4].trimmingCharacters(in: .whitespaces) : ""
 
                 let entry = FoodLogEntry(
-                    name:        name,
+                    name:        name.isEmpty ? "Unknown food" : name,
                     brand:       brand,
                     vitaminDug:  vitD,
                     servingDesc: serv,
                     date:        date)
+
                 foodLog.append(entry)
                 recovered += 1
+                print("Recovery: added \(name) \(vitD)µg")
             }
         }
 
         if recovered > 0 {
             saveFoodLog()
-            print("Recovery: restored \(recovered) food log entries from CSV")
+            print("Recovery: restored \(recovered) food log entries")
         } else {
-            print("Recovery: no food log entries to restore")
+            print("Recovery: no food log entries found")
         }
     }
 
-    // ── Retroactive historical UVI fill ─────────────────────
-    // For readings where:
-    //   - autoIndoors = true (detector said indoors)
-    //   - autoIndoors != indoors (user corrected to outdoors)
-    //   - rawUVI = 0.0 (no real UVI stored — was zeroed by indoor detection)
-    // Fetches the real historical UVI from Open-Meteo archive API
-    // and fills in rawUVI so the raw auto projection is accurate.
-    func fillHistoricalUVI() async {
-        // Find readings that need filling
-        let needsFill = readings.enumerated().filter { _, r in
-            r.rawUVI == 0.0
-            && (r.autoIndoors == true)   // detector said indoors
-            && (r.autoIndoors != r.indoors) // but was corrected to outdoors
-        }
-        guard !needsFill.isEmpty else {
-            print("DataStore: no readings need historical UVI fill")
-            return
-        }
-
-        // Group by date to minimize API calls (one call per day)
-        let cal = Calendar.current
-        var dayMap: [Date: [(offset: Int, element: DayReading)]] = [:]
-        for pair in needsFill {
-            let day = cal.startOfDay(for: pair.element.date)
-            dayMap[day, default: []].append(pair)
-        }
-
-        print("DataStore: fetching historical UVI for \(dayMap.count) days")
-
-        for (day, pairs) in dayMap {
-            guard let hourlyUVI = await fetchHistoricalUVI(
-                date: day,
-                lat:  pairs.first?.element.lat  != 0
-                    ? pairs.first!.element.lat
-                    : profile.lastKnownLat,
-                lon:  pairs.first?.element.lon  != 0
-                    ? pairs.first!.element.lon
-                    : profile.lastKnownLon)
-            else { continue }
-
-            for (idx, reading) in pairs {
-                let hour = cal.component(.hour, from: reading.date)
-                let uvi  = hourlyUVI[min(hour, hourlyUVI.count - 1)]
-                readings[idx].rawUVI = uvi
-                print("DataStore: filled rawUVI=\(uvi) for reading at \(reading.date)")
-            }
-        }
-        saveReadings()
-        print("DataStore: historical UVI fill complete — \(needsFill.count) readings updated")
-    }
-
-    private func fetchHistoricalUVI(
-        date: Date, lat: Double, lon: Double) async -> [Double]? {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        let dateStr = fmt.string(from: date)
-
-        var comps = URLComponents(
-            string: "https://archive-api.open-meteo.com/v1/archive")!
-        comps.queryItems = [
-            .init(name: "latitude",     value: "\(lat)"),
-            .init(name: "longitude",    value: "\(lon)"),
-            .init(name: "start_date",   value: dateStr),
-            .init(name: "end_date",     value: dateStr),
-            .init(name: "hourly",       value: "uv_index"),
-            .init(name: "timezone",     value: "America/Chicago"),
-        ]
-        guard let url = comps.url else { return nil }
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let json = try JSONSerialization.jsonObject(with: data)
-                as! [String: Any]
-            let hourly  = json["hourly"] as? [String: Any] ?? [:]
-            let uviList = hourly["uv_index"] as? [Double] ?? []
-            return uviList.isEmpty ? nil : uviList
-        } catch {
-            print("DataStore: historical UVI fetch failed: \(error)")
-            return nil
-        }
-    }
-
-    // ── Retroactive corrections patch ────────────────────────
-    // Reads corrections.csv from the app's Documents folder,
-    // matches each correction to the closest reading by timestamp,
-    // and sets autoIndoors on that reading to the auto-detected value.
-    // Only runs on readings where autoIndoors is still nil.
-    // Safe to call multiple times — skips already-patched readings.
-    // Status message from last patch attempt — shown in ProfileView
-    @Published var correctionPatchStatus: String = ""
-
-    func patchAutoIndoorsFromCSV() {
-        guard let dir = FileManager.default.urls(
-            for: .documentDirectory,
-            in: .userDomainMask).first else { return }
-
-        let csvURL = dir
-            .appendingPathComponent("Corrections")
-            .appendingPathComponent("corrections.csv")
-
-        guard let content = try? String(contentsOf: csvURL,
-            encoding: .utf8) else {
-            print("DataStore: corrections.csv not found — skipping patch")
-            correctionPatchStatus = "corrections.csv not found — no corrections to apply"
-            return
-        }
-
-        // CSV may use literal \\n or real newline depending on when it was written
-        let separator = content.contains("\\n") ? "\\n" : "\n"
-        let lines = content.components(separatedBy: separator)
-            .dropFirst()  // skip header
-            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-
-        // Parse each correction row
-        struct CorrectionRow {
-            let date:         Date
-            let autoIndoor:   Bool
-            let userIndoor:   Bool
-            let wasWrong:     Bool
-        }
-
-        let fmt = ISO8601DateFormatter()
-        var corrections: [CorrectionRow] = []
-
-        for line in lines {
-            let cols = line.components(separatedBy: ",")
-            // timestamp,lat,lon,gps_accuracy_m,
-            // auto_detected_indoor,user_set_indoor,was_wrong,...
-            guard cols.count >= 7,
-                  let date      = fmt.date(from: cols[0]),
-                  let autoInt   = Int(cols[4]),
-                  let userInt   = Int(cols[5]),
-                  let wrongInt  = Int(cols[6])
-            else { continue }
-
-            corrections.append(CorrectionRow(
-                date:       date,
-                autoIndoor: autoInt  == 1,
-                userIndoor: userInt  == 1,
-                wasWrong:   wrongInt == 1))
-        }
-
-        guard !corrections.isEmpty else {
-            print("DataStore: no corrections to patch")
-            correctionPatchStatus = "corrections.csv found but empty — 0 rows"
-            return
-        }
-
-        var patchCount = 0
-        let matchWindow: TimeInterval = 6 * 60  // 6 minutes
-
-        for correction in corrections {
-            // Find the reading closest to this correction timestamp
-            // within the match window, that hasn't been patched yet
-            let candidates = readings
-                .enumerated()
-                .filter { _, r in
-                    r.autoIndoors == nil &&
-                    r.label == nil &&
-                    abs(r.date.timeIntervalSince(correction.date))
-                        < matchWindow
-                }
-                .sorted { a, b in
-                    abs(a.element.date.timeIntervalSince(correction.date))
-                    < abs(b.element.date.timeIntervalSince(correction.date))
-                }
-
-            guard let (idx, _) = candidates.first else { continue }
-
-            readings[idx].autoIndoors = correction.autoIndoor
-            patchCount += 1
-        }
-
-        if patchCount > 0 {
-            saveReadings()
-            print("DataStore: patched autoIndoors on \(patchCount) readings")
-        }
-        let total = corrections.count
-        let wrong = corrections.filter { $0.wasWrong }.count
-        correctionPatchStatus = patchCount > 0
-            ? "Patched \(patchCount) readings from \(total) corrections (\(wrong) where detector was wrong)"
-            : "\(total) corrections found — all readings already patched or no timestamp matches"
-    }
-
-    // ── Body part SED ────────────────────────────────────────
-
-    func cumulativeBodyPartSED() -> [(String, Double)] {
-        var totals: [String: Double] = [
-            "Head": 0, "Neck": 0, "Upper Arms": 0,
-            "Forearms": 0, "Hands": 0, "Torso": 0,
-            "Upper Legs": 0, "Lower Legs": 0
-        ]
-        for r in readings where !r.indoors && r.label == nil {
-            totals["Head",       default: 0] += r.bodyPartSED.head
-            totals["Neck",       default: 0] += r.bodyPartSED.neck
-            totals["Upper Arms", default: 0] += r.bodyPartSED.upperArms
-            totals["Forearms",   default: 0] += r.bodyPartSED.forearms
-            totals["Hands",      default: 0] += r.bodyPartSED.hands
-            totals["Torso",      default: 0] += r.bodyPartSED.torso
-            totals["Upper Legs", default: 0] += r.bodyPartSED.upperLegs
-            totals["Lower Legs", default: 0] += r.bodyPartSED.lowerLegs
-        }
-        // Return head-to-toe order
-        return [("Head", totals["Head"]!),
-                ("Neck", totals["Neck"]!),
-                ("Upper Arms", totals["Upper Arms"]!),
-                ("Forearms", totals["Forearms"]!),
-                ("Hands", totals["Hands"]!),
-                ("Torso", totals["Torso"]!),
-                ("Upper Legs", totals["Upper Legs"]!),
-                ("Lower Legs", totals["Lower Legs"]!)]
-    }
-
-    var mostExposedBodyPart: (String, Double) {
-        cumulativeBodyPartSED()
-            .max(by: { $0.1 < $1.1 }) ?? ("None", 0)
-    }
 
     // ── CSV parser ───────────────────────────────────────────
     // Parses RFC 4180 CSV — handles quoted fields containing commas,
