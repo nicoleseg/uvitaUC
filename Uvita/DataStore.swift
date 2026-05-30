@@ -459,26 +459,35 @@ class DataStore: ObservableObject {
                 // New format (with neck + raw_uvi, head-to-toe order):
                 //   ...,sed_head,sed_neck,sed_upper_arms,sed_forearms,
                 //   sed_hands,sed_torso,sed_upper_legs,sed_lower_legs (17 cols)
-                let isNewFormat = cols.count >= 17
+                // Old format: 16 cols (no raw_uvi)
+                // New format: 17 cols (raw_uvi added at col 2)
+                // Detect by checking if col 2 looks like raw_uvi
+                // (a float that could be any UVI value)
+                // vs interval_hours (always ~0.0833)
+                let col2val = Double(cols[2]) ?? 0
+                let isNewFormat = cols.count >= 17 && !(col2val > 0.08 && col2val < 0.09)
+                // Column indices for both formats
+                // Old (16 cols): ts,uvi,interval,sed,bsa,clothing,indoors,uncertain,
+                //   head,neck,upper_arms,forearms,hands,torso,upper_legs,lower_legs
+                // New (17 cols): ts,uvi,raw_uvi,interval,sed,bsa,clothing,indoors,uncertain,
+                //   head,neck,upper_arms,forearms,hands,torso,upper_legs,lower_legs
                 let uviIdx          = 1
-                let rawUVIIdx       = isNewFormat ? 2 : 1
+                let rawUVIIdx       = isNewFormat ? 2 : 1      // old has no raw_uvi
                 let intervalIdx     = isNewFormat ? 3 : 2
                 let sedIdx          = isNewFormat ? 4 : 3
                 let bsaIdx          = isNewFormat ? 5 : 4
                 let clothingIdx     = isNewFormat ? 6 : 5
                 let indoorsIdx      = isNewFormat ? 7 : 6
                 let uncertainIdx    = isNewFormat ? 8 : 7
-                // Body part indices differ between old and new format
-                // Old: head,hands,forearms,upper_arms,lower_legs,upper_legs,torso
-                // New: head,neck,upper_arms,forearms,hands,torso,upper_legs,lower_legs
+                // Body part cols — same order in both formats, just offset by 1
                 let sedHeadIdx      = isNewFormat ? 9  : 8
-                let sedNeckIdx      = isNewFormat ? 10 : -1   // didn't exist in old
-                let sedUpperArmsIdx = isNewFormat ? 11 : 11   // old: sed_upper_arms
-                let sedForearmsIdx  = isNewFormat ? 12 : 10   // old: sed_forearms
-                let sedHandsIdx     = isNewFormat ? 13 : 9    // old: sed_hands
-                let sedTorsoIdx     = isNewFormat ? 14 : 14   // old: sed_torso
-                let sedUpperLegsIdx = isNewFormat ? 15 : 13   // old: sed_upper_legs
-                let sedLowerLegsIdx = isNewFormat ? 16 : 12   // old: sed_lower_legs
+                let sedNeckIdx      = isNewFormat ? 10 : 9
+                let sedUpperArmsIdx = isNewFormat ? 11 : 10
+                let sedForearmsIdx  = isNewFormat ? 12 : 11
+                let sedHandsIdx     = isNewFormat ? 13 : 12
+                let sedTorsoIdx     = isNewFormat ? 14 : 13
+                let sedUpperLegsIdx = isNewFormat ? 15 : 14
+                let sedLowerLegsIdx = isNewFormat ? 16 : 15
 
                 guard let uvi      = Double(cols[uviIdx]),
                       let interval = Double(cols[intervalIdx]),
@@ -650,7 +659,9 @@ class DataStore: ObservableObject {
             return
         }
 
-        let lines = content.components(separatedBy: "\n")
+        // CSV may use literal \\n or real newline depending on when it was written
+        let separator = content.contains("\\n") ? "\\n" : "\n"
+        let lines = content.components(separatedBy: separator)
             .dropFirst()  // skip header
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
 

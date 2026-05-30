@@ -42,15 +42,14 @@ struct FileLogger {
             .appendingPathComponent("UVlogs")
             .appendingPathComponent("\(dayString(r.date))_uv.csv")
 
-        let header = "timestamp,uvi,interval_hours,sed," +
+        let header = "timestamp,uvi,raw_uvi,interval_hours,sed," +
             "bsa_pct,clothing,indoors,uncertain," +
             "sed_head,sed_neck,sed_upper_arms,sed_forearms," +
-            "sed_hands,sed_torso,sed_upper_legs,sed_lower_legs\\n"
-            "sed_upper_legs,sed_torso\n"
+            "sed_hands,sed_torso,sed_upper_legs,sed_lower_legs\n"
 
         let bp = r.bodyPartSED
         let row = "\(iso(r.date))," +
-            "\(r.uvi),\(r.intervalHours)," +
+            "\(r.uvi),\(r.rawUVI),\(r.intervalHours)," +
             "\(r.sed),\(r.bsaPercent)," +
             "\"\(r.clothingName)\"," +
             "\(r.indoors ? 1 : 0)," +
@@ -62,6 +61,7 @@ struct FileLogger {
 
         appendToFile(url: file, header: header, row: row)
     }
+
 
     // VitaminD/YYYY-MM-DD_vitamind.csv
     static func logVitaminD(_ r: DayReading) {
