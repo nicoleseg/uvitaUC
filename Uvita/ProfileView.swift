@@ -188,7 +188,7 @@ struct ProfileView: View {
                 }
 
                 Section("Data") {
-                    Button("Recover readings from CSV") {
+                    Button("Recover readings + food log from CSV") {
                         store.recoverReadingsFromCSV()
                     }.foregroundColor(.blue)
                     Button("Clear today's readings") {

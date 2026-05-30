@@ -551,6 +551,81 @@ class DataStore: ObservableObject {
         } else {
             print("Recovery: nothing to restore")
         }
+
+        // Also recover food log entries from Diet CSVs
+        recoverFoodLogFromCSV()
+    }
+
+    func recoverFoodLogFromCSV() {
+        guard let dir = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask).first else { return }
+
+        let dietDir = dir.appendingPathComponent("Diet")
+        guard let files = try? FileManager.default
+            .contentsOfDirectory(at: dietDir,
+                includingPropertiesForKeys: nil)
+            .filter({ $0.pathExtension == "csv" })
+            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+        else {
+            print("Recovery: no Diet CSVs found")
+            return
+        }
+
+        let iso = ISO8601DateFormatter()
+        var recovered = 0
+
+        // Existing food log entry timestamps to avoid duplicates
+        let existingTimestamps = Set(foodLog.map {
+            iso.string(from: $0.date)
+        })
+
+        for file in files {
+            guard let content = try? String(
+                contentsOf: file, encoding: .utf8) else { continue }
+
+            // Handle both real newline and literal \n separator
+            let separator = content.contains("\\n") ? "\\n" : "\n"
+            let lines = content.components(separatedBy: separator)
+                .dropFirst()
+                .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+
+            for line in lines {
+                // CSV: timestamp,food_name,brand,vitamin_d_ug,serving
+                let cols = line.components(separatedBy: ",")
+                guard cols.count >= 5,
+                      let date = iso.date(from: cols[0])
+                else { continue }
+
+                // Skip if already in food log
+                if existingTimestamps.contains(cols[0]) { continue }
+
+                let name  = cols[1].trimmingCharacters(
+                    in: CharacterSet(charactersIn: "\""))
+                let brand = cols[2].trimmingCharacters(
+                    in: CharacterSet(charactersIn: "\""))
+                let vitD  = Double(cols[3]) ?? 0.0
+                let serv  = cols[4].trimmingCharacters(
+                    in: CharacterSet(charactersIn: "\""))
+
+                let entry = FoodLogEntry(
+                    name:        name,
+                    brand:       brand,
+                    vitaminDug:  vitD,
+                    servingDesc: serv,
+                    date:        date)
+
+                foodLog.append(entry)
+                recovered += 1
+            }
+        }
+
+        if recovered > 0 {
+            saveFoodLog()
+            print("Recovery: restored \(recovered) food log entries from CSV")
+        } else {
+            print("Recovery: no food log entries to restore")
+        }
     }
 
     // ── Retroactive historical UVI fill ─────────────────────
