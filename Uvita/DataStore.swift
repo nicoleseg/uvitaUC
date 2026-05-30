@@ -502,8 +502,7 @@ class DataStore: ObservableObject {
             return
         }
 
-        let lines = content.components(separatedBy: "
-")
+        let lines = content.components(separatedBy: "\n")
             .dropFirst()  // skip header
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
 
