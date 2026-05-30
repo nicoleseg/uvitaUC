@@ -396,6 +396,145 @@ class DataStore: ObservableObject {
         return R * 2 * atan2(sqrt(a), sqrt(1 - a))
     }
 
+    // ── CSV recovery ─────────────────────────────────────────
+    // Reads UVlogs CSV files back into readings[] if UserDefaults
+    // was wiped due to model incompatibility. Safe to call multiple
+    // times — skips dates already present in readings[].
+    func recoverReadingsFromCSV() {
+        guard let dir = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask).first else { return }
+
+        let uvlogsDir = dir.appendingPathComponent("UVlogs")
+        guard let files = try? FileManager.default
+            .contentsOfDirectory(at: uvlogsDir,
+                includingPropertiesForKeys: nil)
+            .filter({ $0.pathExtension == "csv" })
+            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+        else {
+            print("Recovery: no UVlogs CSVs found")
+            return
+        }
+
+        let cal = Calendar.current
+        // Dates already in readings — skip these
+        let existingDates = Set(readings.map {
+            cal.startOfDay(for: $0.date)
+        })
+
+        let iso = ISO8601DateFormatter()
+        var recovered = 0
+
+        for file in files {
+            guard let content = try? String(
+                contentsOf: file, encoding: .utf8) else { continue }
+
+            let lines = content.components(separatedBy: "
+")
+                .dropFirst()
+                .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+
+            for line in lines {
+                let cols = line.components(separatedBy: ",")
+                // CSV columns (new format):
+                // timestamp,uvi,raw_uvi,interval_hours,sed,bsa_pct,
+                // clothing,indoors,uncertain,
+                // sed_head,sed_neck,sed_upper_arms,sed_forearms,
+                // sed_hands,sed_torso,sed_upper_legs,sed_lower_legs
+                // Old format (no raw_uvi):
+                // timestamp,uvi,interval_hours,sed,bsa_pct,...
+                guard cols.count >= 9 else { continue }
+                guard let date = iso.date(from: cols[0]) else { continue }
+
+                // Skip if this day already has readings
+                let day = cal.startOfDay(for: date)
+                if existingDates.contains(day) { continue }
+
+                // Detect old vs new format by checking if col[2]
+                // is a double that looks like interval_hours (~0.083)
+                // or raw_uvi (could be any value)
+                let isNewFormat = cols.count >= 17
+                let uviIdx          = 1
+                let rawUVIIdx       = isNewFormat ? 2 : 1
+                let intervalIdx     = isNewFormat ? 3 : 2
+                let sedIdx          = isNewFormat ? 4 : 3
+                let bsaIdx          = isNewFormat ? 5 : 4
+                let clothingIdx     = isNewFormat ? 6 : 5
+                let indoorsIdx      = isNewFormat ? 7 : 6
+                let uncertainIdx    = isNewFormat ? 8 : 7
+                let sedHeadIdx      = isNewFormat ? 9  : 8
+                let sedNeckIdx      = isNewFormat ? 10 : -1
+                let sedUpperArmsIdx = isNewFormat ? 11 : 9
+                let sedForearmsIdx  = isNewFormat ? 12 : 10
+                let sedHandsIdx     = isNewFormat ? 13 : 11
+                let sedTorsoIdx     = isNewFormat ? 14 : 12
+                let sedUpperLegsIdx = isNewFormat ? 15 : 13
+                let sedLowerLegsIdx = isNewFormat ? 16 : 14
+
+                guard let uvi      = Double(cols[uviIdx]),
+                      let interval = Double(cols[intervalIdx]),
+                      let sed      = Double(cols[sedIdx]),
+                      let bsa      = Double(cols[bsaIdx]),
+                      let indoorsI = Int(cols[indoorsIdx].trimmingCharacters(
+                          in: .whitespaces))
+                else { continue }
+
+                let rawUVI    = Double(cols[rawUVIIdx]) ?? uvi
+                let uncertain = Int(cols[uncertainIdx]
+                    .trimmingCharacters(in: .whitespaces)) == 1
+
+                // Reconstruct BodyPartSED
+                func d(_ idx: Int) -> Double {
+                    guard idx >= 0, idx < cols.count else { return 0 }
+                    return Double(cols[idx]) ?? 0
+                }
+                let bp = BodyPartSED(
+                    head:      d(sedHeadIdx),
+                    neck:      sedNeckIdx >= 0 ? d(sedNeckIdx) : 0,
+                    upperArms: d(sedUpperArmsIdx),
+                    forearms:  d(sedForearmsIdx),
+                    hands:     d(sedHandsIdx),
+                    torso:     d(sedTorsoIdx),
+                    upperLegs: d(sedUpperLegsIdx),
+                    lowerLegs: d(sedLowerLegsIdx))
+
+                // Estimate plasma from profile (best we can do without
+                // the original longitudinal context)
+                let clothing = cols[clothingIdx]
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+
+                let reading = DayReading(
+                    date:          date,
+                    uvi:           uvi,
+                    rawUVI:        rawUVI,
+                    intervalHours: interval,
+                    sed:           sed,
+                    bsaPercent:    bsa,
+                    oralUg:        profile.supplementOralUg,
+                    plasmaLevel:   profile.initialLevel,
+                    indoors:       indoorsI == 1,
+                    bodyPartSED:   bp,
+                    clothingName:  clothing,
+                    isUncertain:   uncertain,
+                    label:         nil,
+                    lat:           0.0,
+                    lon:           0.0,
+                    gpsAccuracy:   0.0,
+                    autoIndoors:   nil)
+
+                readings.append(reading)
+                recovered += 1
+            }
+        }
+
+        if recovered > 0 {
+            saveReadings()
+            print("Recovery: restored \(recovered) readings from CSV")
+        } else {
+            print("Recovery: nothing to restore")
+        }
+    }
+
     // ── Retroactive historical UVI fill ─────────────────────
     // For readings where:
     //   - autoIndoors = true (detector said indoors)

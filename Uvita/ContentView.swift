@@ -45,6 +45,9 @@ struct ContentView: View {
                 store.profile.initialLevel = 30
             }
             showOnboarding = !store.profile.onboardingComplete
+            // Recover readings from CSV if UserDefaults was wiped
+            store.recoverReadingsFromCSV()
+
             // Keep profile's last known location updated
             location.onStoreLocationUpdate = { lat, lon in
                 store.profile.lastKnownLat = lat
