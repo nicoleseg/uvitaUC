@@ -429,8 +429,7 @@ class DataStore: ObservableObject {
             guard let content = try? String(
                 contentsOf: file, encoding: .utf8) else { continue }
 
-            let lines = content.components(separatedBy: "
-")
+            let lines = content.components(separatedBy: "\n")
                 .dropFirst()
                 .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
 
