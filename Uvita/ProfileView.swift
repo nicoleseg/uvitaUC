@@ -124,6 +124,69 @@ struct ProfileView: View {
                     Text(oralSourceNote).font(.caption2).foregroundColor(.secondary)
                 }
 
+                Section("Corrections patch") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Image(systemName:
+                                store.correctionPatchStatus.contains("Patched")
+                                ? "checkmark.circle.fill"
+                                : store.correctionPatchStatus.contains("not found")
+                                ? "xmark.circle.fill"
+                                : "info.circle.fill")
+                                .foregroundColor(
+                                    store.correctionPatchStatus.contains("Patched")
+                                    ? .green
+                                    : store.correctionPatchStatus.contains("not found")
+                                    ? .orange : .blue)
+                            Text(store.correctionPatchStatus.isEmpty
+                                 ? "Not run yet — launch app to trigger"
+                                 : store.correctionPatchStatus)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Button("Re-run patch") {
+                            store.patchAutoIndoorsFromCSV()
+                        }
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                    }
+                }
+
+                Section("Study window") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Study start date")
+                            .font(.subheadline)
+                        Text("Readings before this date are excluded from all model calculations and projections. CSV files are unaffected.")
+                            .font(.caption).foregroundColor(.secondary)
+                        if let start = store.profile.studyStartDate {
+                            HStack {
+                                Text(start.formatted(.dateTime.month().day().year()))
+                                    .font(.subheadline).fontWeight(.semibold)
+                                Spacer()
+                                Button("Clear") {
+                                    store.profile.studyStartDate = nil
+                                    store.saveProfile()
+                                }
+                                .foregroundColor(.orange)
+                                .font(.caption)
+                            }
+                        } else {
+                            Text("Not set — using all data")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                        DatePicker(
+                            "Set start date",
+                            selection: Binding(
+                                get: { store.profile.studyStartDate ?? Date() },
+                                set: {
+                                    store.profile.studyStartDate = $0
+                                    store.saveProfile()
+                                }),
+                            displayedComponents: .date)
+                            .labelsHidden()
+                    }
+                }
+
                 Section("Data") {
                     Button("Clear today's readings") {
                         store.clearToday()

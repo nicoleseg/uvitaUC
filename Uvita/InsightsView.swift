@@ -79,6 +79,21 @@ struct InsightsView: View {
             C0:        store.profile.initialLevel)
     }
 
+    // Raw auto projection — same window, but uses autoIndoors
+    // values instead of user-corrected values
+    var rawProjection90: [Double] {
+        store.rawAutoProjection(windowDays: projectionWindow)
+    }
+
+    // Whether there's any meaningful difference between the two
+    var projectionsHaveDiff: Bool {
+        guard projection90.count == rawProjection90.count,
+              !projection90.isEmpty else { return false }
+        let maxDiff = zip(projection90, rawProjection90)
+            .map { abs($0 - $1) }.max() ?? 0
+        return maxDiff > 0.1  // more than 0.1 nmol/L difference
+    }
+
     var projectionEndDate: Date {
         Calendar.current.date(byAdding: .day, value: 89, to: Date()) ?? Date()
     }
@@ -217,10 +232,43 @@ struct InsightsView: View {
                                 }.padding(.horizontal)
 
                                 ProjectionChart(
-                                    data: projection90,
+                                    data:      projection90,
+                                    rawData:   projectionsHaveDiff ? rawProjection90 : nil,
                                     startDate: Date(),
-                                    endDate: projectionEndDate)
+                                    endDate:   projectionEndDate)
                                     .frame(height: 240).padding(.horizontal)
+
+                                if projectionsHaveDiff {
+                                    HStack(spacing: 16) {
+                                        HStack(spacing: 5) {
+                                            Rectangle().fill(Color.teal)
+                                                .frame(width: 20, height: 3)
+                                            Text("With corrections")
+                                                .font(.caption2).foregroundColor(.secondary)
+                                        }
+                                        HStack(spacing: 5) {
+                                            Rectangle().fill(Color.gray.opacity(0.6))
+                                                .frame(width: 20, height: 3)
+                                                .overlay(
+                                                    GeometryReader { g in
+                                                        Path { p in
+                                                            stride(from: 0, to: g.size.width, by: 4).forEach { x in
+                                                                p.move(to: .init(x: x, y: g.size.height/2))
+                                                                p.addLine(to: .init(x: x+2, y: g.size.height/2))
+                                                            }
+                                                        }.stroke(Color.gray, lineWidth: 2)
+                                                    }
+                                                )
+                                            Text("Auto-detected only")
+                                                .font(.caption2).foregroundColor(.secondary)
+                                        }
+                                    }
+                                    .padding(.horizontal)
+                                } else if !projection90.isEmpty {
+                                    Text("No corrections made — lines are identical")
+                                        .font(.caption2).foregroundColor(.secondary)
+                                        .padding(.horizontal)
+                                }
 
                                 Text("14d window recommended — matches 25-day plasma half-life.")
                                     .font(.caption2).foregroundColor(.secondary)
@@ -336,11 +384,18 @@ struct LongitudinalLineChart: View {
 
 
 // ── Projection chart — segment-colored by value ───────────────
+// rawData is optional second line showing auto-detection only
 struct ProjectionChart: View {
-    let data: [Double]; let startDate: Date; let endDate: Date
+    let data:      [Double]
+    var rawData:   [Double]? = nil
+    let startDate: Date
+    let endDate:   Date
+
+    var allValues: [Double] { data + (rawData ?? []) }
     var minVal: Double { 20.0 }
-    var maxVal: Double { max(60, data.max() ?? 60) }
+    var maxVal: Double { max(60, allValues.max() ?? 60) }
     var range:  Double { maxVal - minVal }
+
     var endDateLabel: String {
         let fmt = DateFormatter(); fmt.dateFormat = "MMM d"
         return fmt.string(from: endDate)
@@ -348,6 +403,7 @@ struct ProjectionChart: View {
     func lineColor(_ v: Double) -> Color {
         v < 30 ? .red : v < 50 ? .orange : .green
     }
+
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width
@@ -361,17 +417,34 @@ struct ProjectionChart: View {
                     .frame(width: w, height: h - y30).offset(y: y30)
                 Rectangle().fill(Color.green.opacity(0.06))
                     .frame(width: w, height: y50)
-                Rectangle().fill(Color.green.opacity(0.4)).frame(height: 1).offset(y: y50)
+                Rectangle().fill(Color.green.opacity(0.4))
+                    .frame(height: 1).offset(y: y50)
                 Text("50 sufficient").font(.system(size: 8)).foregroundColor(.green)
                     .offset(x: 2, y: y50 - 10)
-                Rectangle().fill(Color.red.opacity(0.4)).frame(height: 1).offset(y: y30)
+                Rectangle().fill(Color.red.opacity(0.4))
+                    .frame(height: 1).offset(y: y30)
                 Text("30 deficient").font(.system(size: 8)).foregroundColor(.red)
                     .offset(x: 2, y: y30 - 10)
 
+                // Raw auto line — dashed gray, drawn first (behind)
+                if let raw = rawData, raw.count >= 2 {
+                    Path { p in
+                        for i in 0..<raw.count {
+                            let x = w * CGFloat(i) / CGFloat(raw.count - 1)
+                            let y = h - h * CGFloat((raw[i] - minVal) / range)
+                            i == 0 ? p.move(to: .init(x: x, y: y))
+                                   : p.addLine(to: .init(x: x, y: y))
+                        }
+                    }
+                    .stroke(Color.gray.opacity(0.5),
+                            style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                }
+
+                // Corrected line — colored by plasma value, drawn on top
                 if n >= 2 {
                     ForEach(0..<(n-1), id: \.self) { i in
-                        let x1 = w * CGFloat(i)     / CGFloat(n-1)
-                        let x2 = w * CGFloat(i+1)   / CGFloat(n-1)
+                        let x1 = w * CGFloat(i)   / CGFloat(n-1)
+                        let x2 = w * CGFloat(i+1) / CGFloat(n-1)
                         let y1 = h - h * CGFloat((data[i]   - minVal) / range)
                         let y2 = h - h * CGFloat((data[i+1] - minVal) / range)
                         Path { p in
@@ -384,12 +457,14 @@ struct ProjectionChart: View {
                 ForEach([0,14,29,44,59,74,89], id: \.self) { i in
                     if i < n {
                         let x = w * CGFloat(i) / CGFloat(n-1)
-                        Text("D\(i+1)").font(.system(size: 8)).foregroundColor(.secondary)
+                        Text("D\(i+1)").font(.system(size: 8))
+                            .foregroundColor(.secondary)
                             .position(x: x, y: h + 10)
                     }
                 }
                 Text(endDateLabel).font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.secondary).position(x: w - 20, y: h + 22)
+                    .foregroundColor(.secondary)
+                    .position(x: w - 20, y: h + 22)
             }
         }
     }

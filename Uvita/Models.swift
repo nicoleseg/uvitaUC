@@ -66,6 +66,9 @@ struct UserProfile: Codable {
     var initialLevel:      Double           = 30.0
     var oralSource:        OralIntakeSource = .useEstimate
     var onboardingComplete                  = false
+    // Study start date — readings before this date are excluded
+    // from all model calculations. nil means use all data.
+    var studyStartDate:    Date?            = nil
 
     // Daily oral µg from supplement / estimate.
     // Food log entries are tracked separately in DataStore
@@ -296,30 +299,30 @@ struct DayReading: Codable, Identifiable {
     var id            = UUID()
     let date:          Date
     let uvi:           Double
-    let intervalHours: Double   // duration this reading represents (5/60)
-    let sed:           Double   // per-reading SED — small, sums to daily E(t)
+    // intervalHours defaults to 5-min slice for old readings
+    var intervalHours: Double   = 5.0 / 60.0
+    let sed:           Double
     let bsaPercent:    Double
-    let oralUg:        Double   // snapshot oral µg at time of reading (not used in model directly)
-    let plasmaLevel:   Double   // live estimate shown in UI only — not used in longitudinal model
+    let oralUg:        Double
+    let plasmaLevel:   Double
     let indoors:       Bool
     let bodyPartSED:   BodyPartSED
     let clothingName:  String
-    // Uncertainty flag — true when GPS accuracy was poor at time of reading.
-    // Does NOT affect indoor/outdoor detection or SED calculation.
-    // Logged to CSV for later evaluation of detector reliability.
-    // Uncertain when: accuracy > 40m (poor fix) OR
-    //                 accuracy > 25m AND device was stationary
-    //                 (stationary + poor accuracy = weak indoor signal pattern)
-    let isUncertain:   Bool
-    // Optional label for manually triggered readings.
-    // nil for automatic 5-min readings.
-    // Set by user via the "Log now" button for ground-truth annotation.
-    let label:         String?
-    // GPS coordinates at time of reading — always stored,
-    // used for manual labeled readings and corrections evaluation.
-    let lat:           Double
-    let lon:           Double
-    let gpsAccuracy:   Double
+    // Defaults to false for old readings that predate this field
+    var isUncertain:   Bool     = false
+    // nil for auto readings, set for Log Now readings
+    var label:         String?  = nil
+    // GPS coords — default to 0 for old readings
+    var lat:           Double   = 0.0
+    var lon:           Double   = 0.0
+    var gpsAccuracy:   Double   = 0.0
+    // What the OSM auto-detector originally said before any user correction.
+    // Defaults to same as indoors for old readings (no correction history).
+    // Set from corrections.csv retroactive patch on first launch.
+    var autoIndoors:   Bool?    = nil
+
+    // Resolved auto value — falls back to indoors if not patched yet
+    var autoIndoorsResolved: Bool { autoIndoors ?? indoors }
 }
 
 struct FoodLogEntry: Codable, Identifiable {

@@ -1316,9 +1316,10 @@ struct LogNowSheet: View {
     @EnvironmentObject var location: LocationManager
     @Environment(\.dismiss) var dismiss
 
-    @State private var labelText   = ""
-    @State private var isLogging   = false
+    @State private var labelText      = ""
+    @State private var isLogging      = false
     @State private var loggedReading: DayReading? = nil
+    @State private var autoCorrection: String?    = nil
 
     // Suggested label prefixes for quick entry
     let suggestions = [
@@ -1440,6 +1441,18 @@ struct LogNowSheet: View {
                                             r.plasmaLevel))
                                 DataRow(label: "Saved to",
                                         value: "LabeledReadings/labeled_readings.csv")
+                                if let ac = autoCorrection {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .foregroundColor(.orange).font(.caption)
+                                        Text(ac)
+                                            .font(.caption2).foregroundColor(.orange)
+                                    }
+                                    .padding(8)
+                                    .background(Color.orange.opacity(0.1))
+                                    .cornerRadius(8)
+                                    .padding(.horizontal)
+                                }
                             }
                             .background(Color.gray.opacity(0.06))
                             .cornerRadius(10)
@@ -1456,11 +1469,65 @@ struct LogNowSheet: View {
                         dismissKeyboard()
                         isLogging = true
                         Task {
+                            let trimmedLabel = labelText
+                                .trimmingCharacters(in: .whitespaces)
                             await tracker.logNow(
                                 location: location,
                                 store: store,
-                                label: labelText.trimmingCharacters(
-                                    in: .whitespaces))
+                                label: trimmedLabel)
+
+                            // Auto-correct based on label keywords
+                            // "outside" → should be outdoors, "inside" → indoors
+                            if let reading = store.readings
+                                .filter({ $0.label != nil })
+                                .sorted(by: { $0.date > $1.date })
+                                .first {
+
+                                let lower = trimmedLabel.lowercased()
+                                let hasOutside = lower.contains("outside")
+                                let hasInside  = lower.contains("inside")
+
+                                if hasOutside || hasInside {
+                                    let expectedIndoors = hasInside && !hasOutside
+                                    let detectedIndoors = reading.indoors
+
+                                    if expectedIndoors != detectedIndoors {
+                                        // Mismatch — auto-generate correction
+                                        let idx = store.readings.lastIndex(
+                                            where: { $0.id == reading.id })
+                                        if let idx = idx {
+                                            // Store what detector said as autoIndoors
+                                            store.readings[idx].autoIndoors =
+                                                detectedIndoors
+                                            // Fix the reading's indoors state
+                                            // Note: indoors is let, so we patch
+                                            // autoIndoors only — projection uses
+                                            // autoIndoorsResolved for raw line
+                                        }
+
+                                        // Log synthetic correction to CSV
+                                        let corrUVI = expectedIndoors
+                                            ? 0.0 : reading.uvi
+                                        let corrSED = VitaminDEngine.uviToSED(
+                                            uvi: corrUVI,
+                                            intervalHours: reading.intervalHours)
+                                        FileLogger.logCorrection(
+                                            date:         reading.date,
+                                            lat:          reading.lat,
+                                            lon:          reading.lon,
+                                            accuracy:     reading.gpsAccuracy,
+                                            autoDetected: detectedIndoors,
+                                            userSet:      expectedIndoors,
+                                            uvi:          corrUVI,
+                                            sed:          corrSED)
+
+                                        autoCorrection = expectedIndoors
+                                            ? "Detector said outdoors — corrected to indoors based on label"
+                                            : "Detector said indoors — corrected to outdoors based on label"
+                                    }
+                                }
+                            }
+
                             // Get the reading just added
                             loggedReading = store.readings
                                 .filter { $0.label != nil }

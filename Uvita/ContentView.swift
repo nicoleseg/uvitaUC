@@ -45,6 +45,9 @@ struct ContentView: View {
                 store.profile.initialLevel = 30
             }
             showOnboarding = !store.profile.onboardingComplete
+            // Retroactively patch autoIndoors from corrections.csv
+            // Safe to call every launch — skips already-patched readings
+            store.patchAutoIndoorsFromCSV()
         }
     }
 }
