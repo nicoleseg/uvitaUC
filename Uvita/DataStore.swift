@@ -429,57 +429,29 @@ class DataStore: ObservableObject {
             guard let content = try? String(
                 contentsOf: file, encoding: .utf8) else { continue }
 
-            let lines = content.components(separatedBy: "\n")
-                .dropFirst()
-                .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            let rows = parseCSV(content)
+            let dataRows = Array(rows.dropFirst()).filter { !$0.isEmpty }
 
-            for line in lines {
-                let cols = line.components(separatedBy: ",")
-                // CSV columns (new format):
-                // timestamp,uvi,raw_uvi,interval_hours,sed,bsa_pct,
-                // clothing,indoors,uncertain,
-                // sed_head,sed_neck,sed_upper_arms,sed_forearms,
-                // sed_hands,sed_torso,sed_upper_legs,sed_lower_legs
-                // Old format (no raw_uvi):
-                // timestamp,uvi,interval_hours,sed,bsa_pct,...
-                guard cols.count >= 9 else { continue }
-                guard let date = iso.date(from: cols[0]) else { continue }
+            for cols in dataRows {
+                guard cols.count >= 8 else { continue }
+                let tsStr = cols[0].trimmingCharacters(in: .whitespaces)
+                guard let date = iso.date(from: tsStr) else { continue }
 
-                // Skip if this day already has readings
                 let day = cal.startOfDay(for: date)
                 if existingDates.contains(day) { continue }
 
-                // Detect old vs new format by checking if col[2]
-                // is a double that looks like interval_hours (~0.083)
-                // or raw_uvi (could be any value)
-                // Detect format by reading the header of the file
-                // Old format (pre-neck, pre-raw_uvi):
-                //   ...,sed_head,sed_hands,sed_forearms,sed_upper_arms,
-                //   sed_lower_legs,sed_upper_legs,sed_torso  (15 cols)
-                // New format (with neck + raw_uvi, head-to-toe order):
-                //   ...,sed_head,sed_neck,sed_upper_arms,sed_forearms,
-                //   sed_hands,sed_torso,sed_upper_legs,sed_lower_legs (17 cols)
-                // Old format: 16 cols (no raw_uvi)
-                // New format: 17 cols (raw_uvi added at col 2)
-                // Detect by checking if col 2 looks like raw_uvi
-                // (a float that could be any UVI value)
-                // vs interval_hours (always ~0.0833)
                 let col2val = Double(cols[2]) ?? 0
-                let isNewFormat = cols.count >= 17 && !(col2val > 0.08 && col2val < 0.09)
-                // Column indices for both formats
-                // Old (16 cols): ts,uvi,interval,sed,bsa,clothing,indoors,uncertain,
-                //   head,neck,upper_arms,forearms,hands,torso,upper_legs,lower_legs
-                // New (17 cols): ts,uvi,raw_uvi,interval,sed,bsa,clothing,indoors,uncertain,
-                //   head,neck,upper_arms,forearms,hands,torso,upper_legs,lower_legs
+                let isNewFormat = cols.count >= 17 &&
+                    !(col2val > 0.08 && col2val < 0.09)
+
                 let uviIdx          = 1
-                let rawUVIIdx       = isNewFormat ? 2 : 1      // old has no raw_uvi
+                let rawUVIIdx       = isNewFormat ? 2 : 1
                 let intervalIdx     = isNewFormat ? 3 : 2
                 let sedIdx          = isNewFormat ? 4 : 3
                 let bsaIdx          = isNewFormat ? 5 : 4
                 let clothingIdx     = isNewFormat ? 6 : 5
                 let indoorsIdx      = isNewFormat ? 7 : 6
                 let uncertainIdx    = isNewFormat ? 8 : 7
-                // Body part cols — same order in both formats, just offset by 1
                 let sedHeadIdx      = isNewFormat ? 9  : 8
                 let sedNeckIdx      = isNewFormat ? 10 : 9
                 let sedUpperArmsIdx = isNewFormat ? 11 : 10
@@ -493,22 +465,21 @@ class DataStore: ObservableObject {
                       let interval = Double(cols[intervalIdx]),
                       let sed      = Double(cols[sedIdx]),
                       let bsa      = Double(cols[bsaIdx]),
-                      let indoorsI = Int(cols[indoorsIdx].trimmingCharacters(
-                          in: .whitespaces))
+                      let indoorsI = Int(cols[indoorsIdx]
+                          .trimmingCharacters(in: .whitespaces))
                 else { continue }
 
                 let rawUVI    = Double(cols[rawUVIIdx]) ?? uvi
                 let uncertain = Int(cols[uncertainIdx]
                     .trimmingCharacters(in: .whitespaces)) == 1
 
-                // Reconstruct BodyPartSED
                 func d(_ idx: Int) -> Double {
                     guard idx >= 0, idx < cols.count else { return 0 }
                     return Double(cols[idx]) ?? 0
                 }
                 let bp = BodyPartSED(
                     head:      d(sedHeadIdx),
-                    neck:      sedNeckIdx >= 0 ? d(sedNeckIdx) : 0,
+                    neck:      d(sedNeckIdx),
                     upperArms: d(sedUpperArmsIdx),
                     forearms:  d(sedForearmsIdx),
                     hands:     d(sedHandsIdx),
@@ -516,10 +487,7 @@ class DataStore: ObservableObject {
                     upperLegs: d(sedUpperLegsIdx),
                     lowerLegs: d(sedLowerLegsIdx))
 
-                // Estimate plasma from profile (best we can do without
-                // the original longitudinal context)
                 let clothing = cols[clothingIdx]
-                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
 
                 let reading = DayReading(
                     date:          date,
@@ -584,29 +552,23 @@ class DataStore: ObservableObject {
             guard let content = try? String(
                 contentsOf: file, encoding: .utf8) else { continue }
 
-            // Handle both real newline and literal \n separator
-            let separator = content.contains("\\n") ? "\\n" : "\n"
-            let lines = content.components(separatedBy: separator)
-                .dropFirst()
-                .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            // Parse CSV with proper quoted field handling
+            // Food names contain commas (e.g. "Salmon, Atlantic, wild")
+            // so simple split(",") fails — use parseCSV instead
+            let rows = parseCSV(content)
+            guard rows.count > 1 else { continue }
 
-            for line in lines {
-                // CSV: timestamp,food_name,brand,vitamin_d_ug,serving
-                let cols = line.components(separatedBy: ",")
-                guard cols.count >= 5,
-                      let date = iso.date(from: cols[0])
-                else { continue }
+            for row in rows.dropFirst() {
+                guard row.count >= 5 else { continue }
+                let tsStr = row[0].trimmingCharacters(in: .whitespaces)
+                guard let date = iso.date(from: tsStr) else { continue }
+                if existingTimestamps.contains(tsStr) { continue }
 
-                // Skip if already in food log
-                if existingTimestamps.contains(cols[0]) { continue }
-
-                let name  = cols[1].trimmingCharacters(
-                    in: CharacterSet(charactersIn: "\""))
-                let brand = cols[2].trimmingCharacters(
-                    in: CharacterSet(charactersIn: "\""))
-                let vitD  = Double(cols[3]) ?? 0.0
-                let serv  = cols[4].trimmingCharacters(
-                    in: CharacterSet(charactersIn: "\""))
+                let name  = row[1]
+                let brand = row[2]
+                let vitD  = Double(row[3]) ?? 0.0
+                let serv  = row[4]
+                guard vitD > 0 else { continue }
 
                 let entry = FoodLogEntry(
                     name:        name,
@@ -614,7 +576,6 @@ class DataStore: ObservableObject {
                     vitaminDug:  vitD,
                     servingDesc: serv,
                     date:        date)
-
                 foodLog.append(entry)
                 recovered += 1
             }
@@ -843,6 +804,65 @@ class DataStore: ObservableObject {
     var mostExposedBodyPart: (String, Double) {
         cumulativeBodyPartSED()
             .max(by: { $0.1 < $1.1 }) ?? ("None", 0)
+    }
+
+    // ── CSV parser ───────────────────────────────────────────
+    // Parses RFC 4180 CSV — handles quoted fields containing commas,
+    // both real newlines and literal \n separators.
+    private func parseCSV(_ content: String) -> [[String]] {
+        // Normalise line endings — handle literal \n in old files
+        let normalised = content
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r",   with: "\n")
+
+        var rows:   [[String]] = []
+        var cols:   [String]   = []
+        var field              = ""
+        var inQuotes           = false
+        var i                  = normalised.startIndex
+
+        while i < normalised.endIndex {
+            let ch = normalised[i]
+            if inQuotes {
+                if ch == "\"" {
+                    let next = normalised.index(after: i)
+                    if next < normalised.endIndex && normalised[next] == "\"" {
+                        // Escaped quote inside quoted field
+                        field.append("\"")
+                        i = normalised.index(after: next)
+                        continue
+                    } else {
+                        inQuotes = false
+                    }
+                } else {
+                    field.append(ch)
+                }
+            } else {
+                if ch == "\"" {
+                    inQuotes = true
+                } else if ch == "," {
+                    cols.append(field)
+                    field = ""
+                } else if ch == "\n" {
+                    cols.append(field)
+                    field = ""
+                    if !cols.isEmpty {
+                        rows.append(cols)
+                    }
+                    cols = []
+                } else {
+                    field.append(ch)
+                }
+            }
+            i = normalised.index(after: i)
+        }
+        // Last field/row
+        cols.append(field)
+        if !cols.isEmpty && !(cols.count == 1 && cols[0].isEmpty) {
+            rows.append(cols)
+        }
+        return rows
     }
 
     // ── Persistence ──────────────────────────────────────────
