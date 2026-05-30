@@ -145,7 +145,7 @@ struct ProfileView: View {
                                 .foregroundColor(.secondary)
                         }
                         Button("Re-run patch") {
-                            store.patchAutoIndoorsFromCSV()
+                            store.runCorrectionsPatch()
                         }
                         .font(.caption)
                         .foregroundColor(.blue)

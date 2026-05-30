@@ -57,7 +57,7 @@ struct ContentView: View {
 
             // Retroactively patch autoIndoors from corrections.csv
             // Safe to call every launch — skips already-patched readings
-            store.patchAutoIndoorsFromCSV()
+            store.runCorrectionsPatch()
 
             // Fill historical UVI for readings where detector was wrong
             // (autoIndoors=true but corrected to outdoors, rawUVI=0)

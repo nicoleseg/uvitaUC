@@ -308,6 +308,75 @@ class DataStore: ObservableObject {
 
     // Raw auto projection — what the model would show
     // without any user corrections to indoor detection
+    // ── Corrections patch ────────────────────────────────────
+    @Published var correctionPatchStatus: String = ""
+
+    func runCorrectionsPatch() {
+        guard let dir = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask).first else { return }
+
+        let csvURL = dir
+            .appendingPathComponent("Corrections")
+            .appendingPathComponent("corrections.csv")
+
+        guard let content = try? String(contentsOf: csvURL,
+            encoding: .utf8) else {
+            correctionPatchStatus = "corrections.csv not found"
+            return
+        }
+
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = TimeZone(secondsFromGMT: 0)
+
+        struct CorrRow {
+            let date: Date; let autoIndoor: Bool
+            let userIndoor: Bool; let wasWrong: Bool
+        }
+
+        let rows = parseCSV(content)
+        var corrections: [CorrRow] = []
+        for row in rows.dropFirst() {
+            guard row.count >= 7,
+                  let date    = fmt.date(from: row[0].trimmingCharacters(in: .whitespaces)),
+                  let autoInt = Int(row[4].trimmingCharacters(in: .whitespaces)),
+                  let userInt = Int(row[5].trimmingCharacters(in: .whitespaces)),
+                  let wrongInt = Int(row[6].trimmingCharacters(in: .whitespaces))
+            else { continue }
+            corrections.append(CorrRow(
+                date: date, autoIndoor: autoInt == 1,
+                userIndoor: userInt == 1, wasWrong: wrongInt == 1))
+        }
+
+        guard !corrections.isEmpty else {
+            correctionPatchStatus = "corrections.csv found but empty"
+            return
+        }
+
+        var patchCount = 0
+        let matchWindow: TimeInterval = 6 * 60
+        for corr in corrections {
+            let candidates = readings.enumerated().filter { _, r in
+                r.autoIndoors == nil && r.label == nil &&
+                abs(r.date.timeIntervalSince(corr.date)) < matchWindow
+            }.sorted {
+                abs($0.element.date.timeIntervalSince(corr.date)) <
+                abs($1.element.date.timeIntervalSince(corr.date))
+            }
+            guard let (idx, _) = candidates.first else { continue }
+            readings[idx].autoIndoors = corr.autoIndoor
+            patchCount += 1
+        }
+
+        if patchCount > 0 { saveReadings() }
+        let wrong = corrections.filter { $0.wasWrong }.count
+        correctionPatchStatus = patchCount > 0
+            ? "Patched \(patchCount) readings from \(corrections.count) corrections (\(wrong) where detector was wrong)"
+            : "\(corrections.count) corrections found — all already patched"
+    }
+
     func rawAutoProjection(windowDays: Int) -> [Double] {
         let aggs = buildRawDayAggregates()
         let window = Array(aggs.suffix(windowDays))
