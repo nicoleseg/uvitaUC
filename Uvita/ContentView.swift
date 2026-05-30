@@ -37,7 +37,6 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            // Apply safe defaults if profile was never saved
             if store.profile.age == 0 {
                 store.profile.age = 20
             }
@@ -45,7 +44,8 @@ struct ContentView: View {
                 store.profile.initialLevel = 30
             }
             showOnboarding = !store.profile.onboardingComplete
-            // Recover readings from CSV if UserDefaults was wiped
+
+            // Recover readings + food log from CSV if UserDefaults was wiped
             store.recoverReadingsFromCSV()
 
             // Keep profile's last known location updated
@@ -55,15 +55,8 @@ struct ContentView: View {
                 store.saveProfile()
             }
 
-            // Retroactively patch autoIndoors from corrections.csv
-            // Safe to call every launch — skips already-patched readings
+            // Patch autoIndoors from corrections.csv
             store.runCorrectionsPatch()
-
-            // Fill historical UVI for readings where detector was wrong
-            // (autoIndoors=true but corrected to outdoors, rawUVI=0)
-            Task {
-                await store.fillHistoricalUVI()
-            }
         }
     }
 }
