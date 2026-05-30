@@ -452,6 +452,13 @@ class DataStore: ObservableObject {
                 // Detect old vs new format by checking if col[2]
                 // is a double that looks like interval_hours (~0.083)
                 // or raw_uvi (could be any value)
+                // Detect format by reading the header of the file
+                // Old format (pre-neck, pre-raw_uvi):
+                //   ...,sed_head,sed_hands,sed_forearms,sed_upper_arms,
+                //   sed_lower_legs,sed_upper_legs,sed_torso  (15 cols)
+                // New format (with neck + raw_uvi, head-to-toe order):
+                //   ...,sed_head,sed_neck,sed_upper_arms,sed_forearms,
+                //   sed_hands,sed_torso,sed_upper_legs,sed_lower_legs (17 cols)
                 let isNewFormat = cols.count >= 17
                 let uviIdx          = 1
                 let rawUVIIdx       = isNewFormat ? 2 : 1
@@ -461,14 +468,17 @@ class DataStore: ObservableObject {
                 let clothingIdx     = isNewFormat ? 6 : 5
                 let indoorsIdx      = isNewFormat ? 7 : 6
                 let uncertainIdx    = isNewFormat ? 8 : 7
+                // Body part indices differ between old and new format
+                // Old: head,hands,forearms,upper_arms,lower_legs,upper_legs,torso
+                // New: head,neck,upper_arms,forearms,hands,torso,upper_legs,lower_legs
                 let sedHeadIdx      = isNewFormat ? 9  : 8
-                let sedNeckIdx      = isNewFormat ? 10 : -1
-                let sedUpperArmsIdx = isNewFormat ? 11 : 9
-                let sedForearmsIdx  = isNewFormat ? 12 : 10
-                let sedHandsIdx     = isNewFormat ? 13 : 11
-                let sedTorsoIdx     = isNewFormat ? 14 : 12
-                let sedUpperLegsIdx = isNewFormat ? 15 : 13
-                let sedLowerLegsIdx = isNewFormat ? 16 : 14
+                let sedNeckIdx      = isNewFormat ? 10 : -1   // didn't exist in old
+                let sedUpperArmsIdx = isNewFormat ? 11 : 11   // old: sed_upper_arms
+                let sedForearmsIdx  = isNewFormat ? 12 : 10   // old: sed_forearms
+                let sedHandsIdx     = isNewFormat ? 13 : 9    // old: sed_hands
+                let sedTorsoIdx     = isNewFormat ? 14 : 14   // old: sed_torso
+                let sedUpperLegsIdx = isNewFormat ? 15 : 13   // old: sed_upper_legs
+                let sedLowerLegsIdx = isNewFormat ? 16 : 12   // old: sed_lower_legs
 
                 guard let uvi      = Double(cols[uviIdx]),
                       let interval = Double(cols[intervalIdx]),
