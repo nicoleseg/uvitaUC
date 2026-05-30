@@ -45,9 +45,22 @@ struct ContentView: View {
                 store.profile.initialLevel = 30
             }
             showOnboarding = !store.profile.onboardingComplete
+            // Keep profile's last known location updated
+            location.onStoreLocationUpdate = { lat, lon in
+                store.profile.lastKnownLat = lat
+                store.profile.lastKnownLon = lon
+                store.saveProfile()
+            }
+
             // Retroactively patch autoIndoors from corrections.csv
             // Safe to call every launch — skips already-patched readings
             store.patchAutoIndoorsFromCSV()
+
+            // Fill historical UVI for readings where detector was wrong
+            // (autoIndoors=true but corrected to outdoors, rawUVI=0)
+            Task {
+                await store.fillHistoricalUVI()
+            }
         }
     }
 }

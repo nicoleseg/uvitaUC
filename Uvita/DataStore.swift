@@ -123,14 +123,44 @@ class DataStore: ObservableObject {
         upTo endDate: Date? = nil) -> [DayAggregate] {
         let cal  = Calendar.current
         var dayMap: [Date: [DayReading]] = [:]
-        // Apply study start date filter if set
         let startCutoff = profile.studyStartDate
             .map { cal.startOfDay(for: $0) }
         for r in readings {
             let day = cal.startOfDay(for: r.date)
-            if let end   = endDate,   r.date > end      { continue }
-            if let start = startCutoff, day < start     { continue }
+            if let end   = endDate,   r.date > end  { continue }
+            if let start = startCutoff, day < start { continue }
             dayMap[day, default: []].append(r)
+        }
+
+        // Deduplicate readings that are both close in time AND location.
+        // This handles correction readings and glitches without
+        // collapsing legitimate readings from movement.
+        //
+        // A reading is a duplicate of the previous if:
+        //   - within 5 min (same scheduled interval), AND
+        //   - within 30m GPS distance (same physical location)
+        //
+        // If you moved 50m+ (CoreLocation threshold), readings
+        // are kept separately even if < 5 min apart.
+        let windowSec: TimeInterval = 5 * 60
+        let dupDistanceM: Double    = 30.0
+
+        for day in dayMap.keys {
+            let sorted = dayMap[day]!.sorted { $0.date < $1.date }
+            var deduped: [DayReading] = []
+            for r in sorted {
+                if let last = deduped.last,
+                   r.date.timeIntervalSince(last.date) < windowSec,
+                   haversineDistance(
+                       lat1: last.lat, lon1: last.lon,
+                       lat2: r.lat,   lon2: r.lon) < dupDistanceM {
+                    // Same time window + same location — replace with newest
+                    deduped[deduped.count - 1] = r
+                } else {
+                    deduped.append(r)
+                }
+            }
+            dayMap[day] = deduped
         }
         return dayMap
             .sorted { $0.key < $1.key }
@@ -232,24 +262,27 @@ class DataStore: ObservableObject {
             let day = cal.startOfDay(for: r.date)
             if let end   = endDate,   r.date > end  { continue }
             if let start = startCutoff, day < start { continue }
-            // Use autoIndoors to recompute SED
-            var raw = r
-            let rawIndoor = r.autoIndoorsResolved
-            // If auto said indoors but user said outdoors (or vice versa),
-            // recompute sed with the auto UVI (0 if auto-indoors)
-            if rawIndoor != r.indoors {
-                let rawUVI = rawIndoor ? 0.0 : r.uvi
-                let rawSED = VitaminDEngine.uviToSED(
-                    uvi: rawUVI,
-                    intervalHours: r.intervalHours)
-                // We can't mutate r directly so store adjusted sed
-                // by creating a wrapper — use the raw sed in aggregate below
-                dayMap[day, default: []].append(r)
-                // Store raw sed alongside — tag via a separate map
-                _ = rawSED  // will use below
-            } else {
-                dayMap[day, default: []].append(r)
+            dayMap[day, default: []].append(r)
+        }
+
+        // Same location-aware deduplication as buildDayAggregates
+        let windowSec: TimeInterval = 5 * 60
+        let dupDistanceM: Double    = 30.0
+        for day in dayMap.keys {
+            let sorted = dayMap[day]!.sorted { $0.date < $1.date }
+            var deduped: [DayReading] = []
+            for r in sorted {
+                if let last = deduped.last,
+                   r.date.timeIntervalSince(last.date) < windowSec,
+                   haversineDistance(
+                       lat1: last.lat, lon1: last.lon,
+                       lat2: r.lat,   lon2: r.lon) < dupDistanceM {
+                    deduped[deduped.count - 1] = r
+                } else {
+                    deduped.append(r)
+                }
             }
+            dayMap[day] = deduped
         }
 
         // Build aggregates using auto-corrected SED values
@@ -343,6 +376,104 @@ class DataStore: ObservableObject {
                 total:       totals[i],
                 uvContrib:   max(0, uvOnly[i]   - profile.initialLevel),
                 oralContrib: max(0, oralOnly[i] - profile.initialLevel))
+        }
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────
+
+    // Haversine distance in metres between two GPS coordinates.
+    // Used to distinguish duplicate readings (same spot, < 30m)
+    // from legitimate movement readings (moved 50m+).
+    private func haversineDistance(lat1: Double, lon1: Double,
+                                    lat2: Double, lon2: Double) -> Double {
+        let R   = 6371000.0  // Earth radius in metres
+        let φ1  = lat1 * .pi / 180
+        let φ2  = lat2 * .pi / 180
+        let Δφ  = (lat2 - lat1) * .pi / 180
+        let Δλ  = (lon2 - lon1) * .pi / 180
+        let a   = sin(Δφ/2) * sin(Δφ/2)
+                + cos(φ1) * cos(φ2) * sin(Δλ/2) * sin(Δλ/2)
+        return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+    }
+
+    // ── Retroactive historical UVI fill ─────────────────────
+    // For readings where:
+    //   - autoIndoors = true (detector said indoors)
+    //   - autoIndoors != indoors (user corrected to outdoors)
+    //   - rawUVI = 0.0 (no real UVI stored — was zeroed by indoor detection)
+    // Fetches the real historical UVI from Open-Meteo archive API
+    // and fills in rawUVI so the raw auto projection is accurate.
+    func fillHistoricalUVI() async {
+        // Find readings that need filling
+        let needsFill = readings.enumerated().filter { _, r in
+            r.rawUVI == 0.0
+            && (r.autoIndoors == true)   // detector said indoors
+            && (r.autoIndoors != r.indoors) // but was corrected to outdoors
+        }
+        guard !needsFill.isEmpty else {
+            print("DataStore: no readings need historical UVI fill")
+            return
+        }
+
+        // Group by date to minimize API calls (one call per day)
+        let cal = Calendar.current
+        var dayMap: [Date: [(offset: Int, element: DayReading)]] = [:]
+        for pair in needsFill {
+            let day = cal.startOfDay(for: pair.element.date)
+            dayMap[day, default: []].append(pair)
+        }
+
+        print("DataStore: fetching historical UVI for \(dayMap.count) days")
+
+        for (day, pairs) in dayMap {
+            guard let hourlyUVI = await fetchHistoricalUVI(
+                date: day,
+                lat:  pairs.first?.element.lat  != 0
+                    ? pairs.first!.element.lat
+                    : profile.lastKnownLat,
+                lon:  pairs.first?.element.lon  != 0
+                    ? pairs.first!.element.lon
+                    : profile.lastKnownLon)
+            else { continue }
+
+            for (idx, reading) in pairs {
+                let hour = cal.component(.hour, from: reading.date)
+                let uvi  = hourlyUVI[min(hour, hourlyUVI.count - 1)]
+                readings[idx].rawUVI = uvi
+                print("DataStore: filled rawUVI=\(uvi) for reading at \(reading.date)")
+            }
+        }
+        saveReadings()
+        print("DataStore: historical UVI fill complete — \(needsFill.count) readings updated")
+    }
+
+    private func fetchHistoricalUVI(
+        date: Date, lat: Double, lon: Double) async -> [Double]? {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let dateStr = fmt.string(from: date)
+
+        var comps = URLComponents(
+            string: "https://archive-api.open-meteo.com/v1/archive")!
+        comps.queryItems = [
+            .init(name: "latitude",     value: "\(lat)"),
+            .init(name: "longitude",    value: "\(lon)"),
+            .init(name: "start_date",   value: dateStr),
+            .init(name: "end_date",     value: dateStr),
+            .init(name: "hourly",       value: "uv_index"),
+            .init(name: "timezone",     value: "America/Chicago"),
+        ]
+        guard let url = comps.url else { return nil }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let json = try JSONSerialization.jsonObject(with: data)
+                as! [String: Any]
+            let hourly  = json["hourly"] as? [String: Any] ?? [:]
+            let uviList = hourly["uv_index"] as? [Double] ?? []
+            return uviList.isEmpty ? nil : uviList
+        } catch {
+            print("DataStore: historical UVI fetch failed: \(error)")
+            return nil
         }
     }
 

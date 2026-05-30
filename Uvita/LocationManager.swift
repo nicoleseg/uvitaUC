@@ -17,6 +17,9 @@ class LocationManager: NSObject, ObservableObject,
     @Published var ready    = false
     @Published var statusMessage = "Waiting for GPS..."
 
+    // Store location update callback — for profile fallback
+    var onStoreLocationUpdate: ((Double, Double) -> Void)?
+
     // BackgroundTracker assigns this to trigger logIfDue()
     // whenever CoreLocation delivers a fresh position.
     // Using CoreLocation as the wake source (not a Timer)
@@ -65,6 +68,9 @@ class LocationManager: NSObject, ObservableObject,
         // whether enough time has passed to actually log.
         // This is the only place onLocationUpdate is called.
         onLocationUpdate?()
+
+        // Notify store to update last known location
+        onStoreLocationUpdate?(latitude, longitude)
     }
 
     func locationManager(

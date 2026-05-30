@@ -69,6 +69,10 @@ struct UserProfile: Codable {
     // Study start date — readings before this date are excluded
     // from all model calculations. nil means use all data.
     var studyStartDate:    Date?            = nil
+    // Last known location — used as fallback for historical
+    // UVI fill on old readings that have lat/lon = 0.0
+    var lastKnownLat:      Double           = 42.0565
+    var lastKnownLon:      Double           = -87.6753
 
     // Daily oral µg from supplement / estimate.
     // Food log entries are tracked separately in DataStore
@@ -298,7 +302,8 @@ struct BodyPartSED: Codable {
 struct DayReading: Codable, Identifiable {
     var id            = UUID()
     let date:          Date
-    let uvi:           Double
+    let uvi:           Double       // effective UVI (0 if indoors)
+    var rawUVI:        Double = 0.0 // UVI from Open-Meteo before indoor zeroing
     // intervalHours defaults to 5-min slice for old readings
     var intervalHours: Double   = 5.0 / 60.0
     let sed:           Double
