@@ -167,9 +167,19 @@ class DataStore: ObservableObject {
             .map { day, rds in
                 // UV dose = sum of all per-reading SEDs for the day
                 let uvDose = rds.reduce(0) { $0 + $1.sed }
-                // Oral dose = last reading's snapshot (daily value)
-                let oral   = rds.sorted { $0.date < $1.date }
-                                .last?.oralUg ?? profile.supplementOralUg
+                // Oral dose — resolved from active source for that day:
+                // If manualLog: sum food log entries for that calendar day
+                // Otherwise: use profile's supplement/estimate value
+                let oral: Double
+                switch profile.oralSource {
+                case .manualLog:
+                    let dayFoodLog = foodLog.filter {
+                        cal.isDate($0.date, inSameDayAs: day)
+                    }
+                    oral = dayFoodLog.reduce(0) { $0 + $1.vitaminDug }
+                default:
+                    oral = profile.supplementOralUg
+                }
                 // BSA = last clothing setting of the day
                 let bsa    = rds.sorted { $0.date < $1.date }
                                 .last?.bsaPercent ?? profile.clothing.bsaPercent
@@ -438,13 +448,19 @@ class DataStore: ObservableObject {
 
         let fmt = DateFormatter()
         fmt.dateFormat = "M/d"
+        // Net gain from each source = model output - C0
+        // Use difference between combined and oral-only to get true UV contrib
+        // This avoids the artifact where uvOnly drifts slightly from C0
+        // even with zero UV due to Diffey decay math
         return aggs.enumerated().map { i, agg in
-            DayModelResult(
+            let uvContrib   = max(0, totals[i] - oralOnly[i])
+            let oralContrib = max(0, oralOnly[i] - profile.initialLevel)
+            return DayModelResult(
                 date:        agg.date,
                 label:       fmt.string(from: agg.date),
                 total:       totals[i],
-                uvContrib:   max(0, uvOnly[i]   - profile.initialLevel),
-                oralContrib: max(0, oralOnly[i] - profile.initialLevel))
+                uvContrib:   uvContrib,
+                oralContrib: oralContrib)
         }
     }
 
@@ -566,7 +582,7 @@ class DataStore: ObservableObject {
                     intervalHours: interval,
                     sed:           sed,
                     bsaPercent:    bsa,
-                    oralUg:        profile.supplementOralUg,
+                    oralUg:        0.0,  // resolved per-day in buildDayAggregates
                     plasmaLevel:   profile.initialLevel,
                     indoors:       indoorsI == 1,
                     bodyPartSED:   bp,
@@ -731,6 +747,39 @@ class DataStore: ObservableObject {
             rows.append(cols)
         }
         return rows
+    }
+
+    // ── Body part SED ────────────────────────────────────────
+
+    func getBodyPartSEDTotals() -> [(String, Double)] {
+        var totals: [String: Double] = [
+            "Head": 0, "Neck": 0, "Upper Arms": 0,
+            "Forearms": 0, "Hands": 0, "Torso": 0,
+            "Upper Legs": 0, "Lower Legs": 0
+        ]
+        for r in readings where !r.indoors && r.label == nil {
+            totals["Head",       default: 0] += r.bodyPartSED.head
+            totals["Neck",       default: 0] += r.bodyPartSED.neck
+            totals["Upper Arms", default: 0] += r.bodyPartSED.upperArms
+            totals["Forearms",   default: 0] += r.bodyPartSED.forearms
+            totals["Hands",      default: 0] += r.bodyPartSED.hands
+            totals["Torso",      default: 0] += r.bodyPartSED.torso
+            totals["Upper Legs", default: 0] += r.bodyPartSED.upperLegs
+            totals["Lower Legs", default: 0] += r.bodyPartSED.lowerLegs
+        }
+        return [("Head",       totals["Head"]!),
+                ("Neck",       totals["Neck"]!),
+                ("Upper Arms", totals["Upper Arms"]!),
+                ("Forearms",   totals["Forearms"]!),
+                ("Hands",      totals["Hands"]!),
+                ("Torso",      totals["Torso"]!),
+                ("Upper Legs", totals["Upper Legs"]!),
+                ("Lower Legs", totals["Lower Legs"]!)]
+    }
+
+    func getMostExposedBodyPart() -> (String, Double) {
+        getBodyPartSEDTotals()
+            .max(by: { $0.1 < $1.1 }) ?? ("None", 0)
     }
 
     // ── Persistence ──────────────────────────────────────────

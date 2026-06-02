@@ -1,28 +1,21 @@
 import SwiftUI
+import UIKit
 
-// BodyPartSEDCard lives here (not in InsightsView).
-// Uses the ordered [(String, Double)] array from
-// store.cumulativeBodyPartSED() — head-to-toe order,
-// neck included, auto readings only.
 struct BodyPartSEDCard: View {
     @EnvironmentObject var store: DataStore
 
-    // Ordered head-to-toe array
     var parts: [(String, Double)] {
-        store.cumulativeBodyPartSED()
+        store.getBodyPartSEDTotals()
     }
-
     var maxVal: Double {
         parts.map { $0.1 }.max() ?? 1
     }
-
     var mostExposed: (String, Double) {
-        store.mostExposedBodyPart
+        store.getMostExposedBodyPart()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-
             VStack(alignment: .leading, spacing: 2) {
                 Text("UV Exposure by Body Part")
                     .font(.headline)
@@ -34,16 +27,13 @@ struct BodyPartSEDCard: View {
                 HStack(spacing: 8) {
                     Image(systemName: "sun.max.fill")
                         .foregroundColor(.orange)
-                    (
-                        Text("Most exposed: ")
-                            .foregroundColor(.secondary)
-                        + Text(mostExposed.0)
-                            .fontWeight(.bold)
-                            .foregroundColor(.orange)
-                        + Text(String(format: " (%.4f SED)",
-                                      mostExposed.1))
-                            .foregroundColor(.secondary)
-                    )
+                    (Text("Most exposed: ")
+                        .foregroundColor(.secondary)
+                    + Text(mostExposed.0)
+                        .fontWeight(.bold)
+                        .foregroundColor(.orange)
+                    + Text(String(format: " (%.4f SED)", mostExposed.1))
+                        .foregroundColor(.secondary))
                     .font(.caption)
                 }
                 .padding(8)
@@ -55,17 +45,15 @@ struct BodyPartSEDCard: View {
                 Text("No outdoor readings yet")
                     .font(.caption).foregroundColor(.secondary)
             } else {
-                // Head-to-toe order preserved from DataStore
                 ForEach(parts, id: \.0) { name, value in
                     HStack(spacing: 8) {
                         Text(name)
                             .font(.caption)
                             .frame(width: 80, alignment: .leading)
-
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color(.systemGray5))
+                                    .fill(Color(UIColor.systemGray5))
                                     .frame(height: 14)
                                 RoundedRectangle(cornerRadius: 3)
                                     .fill(barColor(value))
@@ -78,7 +66,6 @@ struct BodyPartSEDCard: View {
                             }
                         }
                         .frame(height: 14)
-
                         Text(String(format: "%.4f", value))
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.secondary)
@@ -87,11 +74,11 @@ struct BodyPartSEDCard: View {
                 }
             }
 
-            Text("Only outdoor auto readings counted · Log Now snapshots excluded")
+            Text("Outdoor auto readings only · Log Now snapshots excluded")
                 .font(.caption2).foregroundColor(.secondary)
         }
         .padding()
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(Color.secondaryBackground)
         .cornerRadius(16)
         .padding(.horizontal)
     }
