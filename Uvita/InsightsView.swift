@@ -193,19 +193,10 @@ struct InsightsView: View {
                                     .font(.caption).foregroundColor(.secondary)
                                 HStack(spacing: 8) {
                                     ForEach([7, 14, 21, 30], id: \.self) { days in
-                                        Button {
-                                            projectionWindow = days
-                                        } label: {
-                                            Text("\(days)d")
-                                                .font(.caption).fontWeight(.semibold)
-                                                .padding(.horizontal, 12).padding(.vertical, 6)
-                                                .background(projectionWindow == days
-                                                    ? Color.blue
-                                                    : Color.gray.opacity(0.06))
-                                                .foregroundColor(projectionWindow == days
-                                                    ? .white : .primary)
-                                                .cornerRadius(8)
-                                        }
+                                        ProjectionWindowButton(
+                                            days: days,
+                                            selected: projectionWindow == days
+                                        ) { projectionWindow = days }
                                     }
                                     Spacer()
                                     Text("(\(actualWindowDays) days data)")
@@ -315,6 +306,23 @@ struct InsightsView: View {
                 .padding(.vertical)
             }
             .navigationTitle("Model Insights")
+        }
+    }
+}
+
+struct ProjectionWindowButton: View {
+    let days:     Int
+    let selected: Bool
+    let action:   () -> Void
+    var body: some View {
+        Button(action: action) {
+            let bg: Color  = selected ? .blue : Color.gray.opacity(0.06)
+            let fg: Color  = selected ? .white : .primary
+            Text("\(days)d")
+                .font(.caption).fontWeight(.semibold)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(bg).foregroundColor(fg)
+                .cornerRadius(8)
         }
     }
 }
