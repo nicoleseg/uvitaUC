@@ -168,7 +168,27 @@ class DataStore: ObservableObject {
             .sorted { $0.key < $1.key }
             .map { day, rds in
                 // UV dose = sum of all per-reading SEDs for the day
-                let uvDose = rds.reduce(0) { $0 + $1.sed }
+                let sortedReadings =
+                    rds.sorted { $0.date < $1.date }
+
+                var uvDose = 0.0
+
+                for i in 1..<sortedReadings.count {
+
+                    let prev = sortedReadings[i - 1]
+                    let curr = sortedReadings[i]
+
+                    let intervalHours =
+                        curr.date.timeIntervalSince(prev.date) / 3600.0
+
+                    let effectiveUVI =
+                        prev.indoors ? 0.0 : prev.uvi
+
+                    uvDose += VitaminDEngine.uviToSED(
+                        uvi: effectiveUVI,
+                        intervalHours: intervalHours
+                    )
+                }
                 // Oral dose — resolved from active source for that day:
                 // If manualLog: sum food log entries for that calendar day
                 // Otherwise: use profile's supplement/estimate value
@@ -310,12 +330,29 @@ class DataStore: ObservableObject {
             .sorted { $0.key < $1.key }
             .map { day, rds in
                 // Recompute UV dose using autoIndoors
-                let uvDose = rds.reduce(0.0) { acc, r in
-                    let rawIndoor = r.autoIndoorsResolved
-                    let rawUVI    = rawIndoor ? 0.0 : r.uvi
-                    return acc + VitaminDEngine.uviToSED(
-                        uvi: rawUVI,
-                        intervalHours: r.intervalHours)
+                let sortedReadings =
+                    rds.sorted { $0.date < $1.date }
+
+                var uvDose = 0.0
+
+                for i in 1..<sortedReadings.count {
+
+                    let prev = sortedReadings[i - 1]
+                    let curr = sortedReadings[i]
+
+                    let intervalHours =
+                        curr.date.timeIntervalSince(prev.date) / 3600.0
+
+                    let rawIndoor =
+                        prev.autoIndoorsResolved
+
+                    let effectiveUVI =
+                        rawIndoor ? 0.0 : prev.uvi
+
+                    uvDose += VitaminDEngine.uviToSED(
+                        uvi: effectiveUVI,
+                        intervalHours: intervalHours
+                    )
                 }
                 let oral = rds.sorted { $0.date < $1.date }
                                .last?.oralUg ?? profile.supplementOralUg

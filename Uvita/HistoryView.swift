@@ -202,9 +202,10 @@ struct DayHistoryRow: View {
                             }
                         }
                         Spacer()
-                        Text(String(format: "%.1f nmol/L", r.plasmaLevel))
-                            .font(.caption).fontWeight(.semibold)
-                            .foregroundColor(levelColor(r.plasmaLevel))
+                        Text(String(format: "%.1f nmol/L", day.total))
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(levelColor(day.total))
                     }
                     .padding(.horizontal).padding(.vertical, 8)
                     Divider().padding(.horizontal)
