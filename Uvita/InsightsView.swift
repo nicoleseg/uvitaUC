@@ -120,6 +120,64 @@ struct InsightsView: View {
         projectedCorrected.firstIndex { $0 >= 50 }.map { $0 + 1 }
     }
 
+    @ViewBuilder
+    private var projectionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("90-Day Projection")
+                .font(.headline).padding(.horizontal)
+
+            // Window picker
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Average over most recent:")
+                    .font(.caption).foregroundColor(.secondary)
+                HStack(spacing: 8) {
+                    ForEach([7, 14, 21, 30], id: \.self) { days in
+                        ProjectionWindowButton(
+                            days: days,
+                            selected: projectionWindow == days
+                        ) { projectionWindow = days }
+                    }
+                    Spacer()
+                    Text("(\(actualWindowDays) days data)")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }.padding(.horizontal)
+
+            // C0 row
+            ProjectionC0Row(level: store.profile.initialLevel)
+
+            // Stats + chart
+            if projectedCorrected.isEmpty {
+                Text("Track at least one day to generate a projection.")
+                    .font(.caption).foregroundColor(.secondary).padding()
+            } else {
+                ProjectionStatsRow(
+                    avgSED:         windowAvgSED,
+                    windowDays:     actualWindowDays,
+                    escapeDay:      daysToEscapeDeficiency,
+                    sufficiencyDay: daysToSufficiency)
+
+                ProjectionChart(
+                    observed:     observedCorrected,
+                    observedRaw:  observedRaw,
+                    projected:    projectedCorrected,
+                    projectedRaw: projectionsHaveDiff ? projectedRaw : nil,
+                    startDate:    longitudinalData.first?.date ?? Date(),
+                    endDate:      projectionEndDate)
+                    .frame(height: 260).padding(.horizontal)
+
+                ProjectionLegend(hasDiff: projectionsHaveDiff)
+
+                Text("14d window recommended — matches 25-day plasma half-life.")
+                    .font(.caption2).foregroundColor(.secondary)
+                    .padding(.horizontal)
+            }
+        }
+        .padding(.vertical)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(16).padding(.horizontal)
+    }
+
     var body: some View {
         NavigationView {
             ScrollView {
@@ -183,129 +241,7 @@ struct InsightsView: View {
 
                         BodyPartSEDCard()
 
-                        // 90-day projection
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("90-Day Projection")
-                                .font(.headline).padding(.horizontal)
-
-                            let windowLabel = "(\(actualWindowDays) days data)"
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Average over most recent:")
-                                    .font(.caption).foregroundColor(.secondary)
-                                HStack(spacing: 8) {
-                                    ForEach([7, 14, 21, 30], id: \.self) { days in
-                                        ProjectionWindowButton(
-                                            days: days,
-                                            selected: projectionWindow == days
-                                        ) { projectionWindow = days }
-                                    }
-                                    Spacer()
-                                    Text(windowLabel)
-                                        .font(.caption2).foregroundColor(.secondary)
-                                }
-                            }.padding(.horizontal)
-
-                            // C0 read-only — edit in Profile
-                            let c0Color: Color = store.profile.initialLevel < 30
-                                ? .red : store.profile.initialLevel < 50 ? .orange : .green
-                            HStack {
-                                Text("Starting plasma (C₀)")
-                                    .font(.caption).foregroundColor(.secondary)
-                                Spacer()
-                                Text(String(format: "%.0f nmol/L",
-                                            store.profile.initialLevel))
-                                    .font(.caption).fontWeight(.semibold)
-                                    .foregroundColor(c0Color)
-                                Text("· set in Profile")
-                                    .font(.caption2).foregroundColor(.secondary)
-                            }.padding(.horizontal)
-
-                            if !projectedCorrected.isEmpty {
-                                let escapeVal   = daysToEscapeDeficiency.map { "Day \($0)" } ?? "Not in 90d"
-                                let escapeColor: Color = daysToEscapeDeficiency != nil ? .green : .red
-                                let suffVal     = daysToSufficiency.map { "Day \($0)" } ?? "Not in 90d"
-                                let suffColor: Color   = daysToSufficiency != nil ? .green : .red
-                                HStack(spacing: 10) {
-                                    StatMiniCard(
-                                        label: "Avg SED (\(actualWindowDays)d)",
-                                        value: String(format: "%.4f", windowAvgSED),
-                                        color: .orange)
-                                    StatMiniCard(
-                                        label: "Escapes deficiency",
-                                        sublabel: "(≥30 nmol/L)",
-                                        value: escapeVal,
-                                        color: escapeColor)
-                                    StatMiniCard(
-                                        label: "Reaches sufficiency",
-                                        sublabel: "(≥50 nmol/L)",
-                                        value: suffVal,
-                                        color: suffColor)
-                                }.padding(.horizontal)
-
-                                ProjectionChart(
-                                    observed:          observedCorrected,
-                                    observedRaw:       observedRaw,
-                                    projected:         projectedCorrected,
-                                    projectedRaw:      projectionsHaveDiff ? projectedRaw : nil,
-                                    startDate:         longitudinalData.first?.date ?? Date(),
-                                    endDate:           projectionEndDate)
-                                    .frame(height: 260).padding(.horizontal)
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(spacing: 14) {
-                                        HStack(spacing: 5) {
-                                            Rectangle().fill(Color.teal)
-                                                .frame(width: 16, height: 2.5)
-                                            Text("Observed (corrected)")
-                                                .font(.caption2).foregroundColor(.secondary)
-                                        }
-                                        HStack(spacing: 5) {
-                                            HStack(spacing: 2) {
-                                                ForEach(0..<3, id: \.self) { _ in
-                                                    Rectangle().fill(Color.teal)
-                                                        .frame(width: 4, height: 2.5)
-                                                }
-                                            }
-                                            Text("Projected (corrected)")
-                                                .font(.caption2).foregroundColor(.secondary)
-                                        }
-                                    }
-                                    HStack(spacing: 14) {
-                                        HStack(spacing: 5) {
-                                            Rectangle().fill(Color.gray.opacity(0.5))
-                                                .frame(width: 16, height: 2)
-                                            Text("Observed (auto only)")
-                                                .font(.caption2).foregroundColor(.secondary)
-                                        }
-                                        HStack(spacing: 5) {
-                                            HStack(spacing: 2) {
-                                                ForEach(0..<3, id: \.self) { _ in
-                                                    Rectangle().fill(Color.gray.opacity(0.5))
-                                                        .frame(width: 4, height: 2)
-                                                }
-                                            }
-                                            Text("Projected (auto only)")
-                                                .font(.caption2).foregroundColor(.secondary)
-                                        }
-                                        if !projectionsHaveDiff {
-                                            Text("· lines identical")
-                                                .font(.caption2).foregroundColor(.secondary)
-                                        }
-                                    }
-                                }
-                                .padding(.horizontal)
-
-                                Text("14d window recommended — matches 25-day plasma half-life.")
-                                    .font(.caption2).foregroundColor(.secondary)
-                                    .padding(.horizontal)
-                            } else {
-                                Text("Track at least one day to generate a projection.")
-                                    .font(.caption).foregroundColor(.secondary).padding()
-                            }
-                        }
-                        .padding(.vertical)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(16).padding(.horizontal)
+                        projectionSection
                     }
                 }
                 .padding(.vertical)
@@ -319,6 +255,64 @@ struct ProjectionWindowButton: View {
     let days:     Int
     let selected: Bool
     let action:   () -> Void
+    @ViewBuilder
+    private var projectionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("90-Day Projection")
+                .font(.headline).padding(.horizontal)
+
+            // Window picker
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Average over most recent:")
+                    .font(.caption).foregroundColor(.secondary)
+                HStack(spacing: 8) {
+                    ForEach([7, 14, 21, 30], id: \.self) { days in
+                        ProjectionWindowButton(
+                            days: days,
+                            selected: projectionWindow == days
+                        ) { projectionWindow = days }
+                    }
+                    Spacer()
+                    Text("(\(actualWindowDays) days data)")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }.padding(.horizontal)
+
+            // C0 row
+            ProjectionC0Row(level: store.profile.initialLevel)
+
+            // Stats + chart
+            if projectedCorrected.isEmpty {
+                Text("Track at least one day to generate a projection.")
+                    .font(.caption).foregroundColor(.secondary).padding()
+            } else {
+                ProjectionStatsRow(
+                    avgSED:         windowAvgSED,
+                    windowDays:     actualWindowDays,
+                    escapeDay:      daysToEscapeDeficiency,
+                    sufficiencyDay: daysToSufficiency)
+
+                ProjectionChart(
+                    observed:     observedCorrected,
+                    observedRaw:  observedRaw,
+                    projected:    projectedCorrected,
+                    projectedRaw: projectionsHaveDiff ? projectedRaw : nil,
+                    startDate:    longitudinalData.first?.date ?? Date(),
+                    endDate:      projectionEndDate)
+                    .frame(height: 260).padding(.horizontal)
+
+                ProjectionLegend(hasDiff: projectionsHaveDiff)
+
+                Text("14d window recommended — matches 25-day plasma half-life.")
+                    .font(.caption2).foregroundColor(.secondary)
+                    .padding(.horizontal)
+            }
+        }
+        .padding(.vertical)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(16).padding(.horizontal)
+    }
+
     var body: some View {
         Button(action: action) {
             let bg: Color  = selected ? .blue : Color.gray.opacity(0.06)
@@ -332,11 +326,162 @@ struct ProjectionWindowButton: View {
     }
 }
 
+
+// ── Projection helper views ───────────────────────────────────
+
+struct ProjectionC0Row: View {
+    let level: Double
+    var body: some View {
+        let color: Color = level < 30 ? .red : level < 50 ? .orange : .green
+        HStack {
+            Text("Starting plasma (C₀)")
+                .font(.caption).foregroundColor(.secondary)
+            Spacer()
+            Text(String(format: "%.0f nmol/L", level))
+                .font(.caption).fontWeight(.semibold)
+                .foregroundColor(color)
+            Text("· set in Profile")
+                .font(.caption2).foregroundColor(.secondary)
+        }.padding(.horizontal)
+    }
+}
+
+struct ProjectionStatsRow: View {
+    let avgSED:         Double
+    let windowDays:     Int
+    let escapeDay:      Int?
+    let sufficiencyDay: Int?
+    var body: some View {
+        let escapeVal:   String = escapeDay.map { "Day \($0)" } ?? "Not in 90d"
+        let escapeColor: Color  = escapeDay != nil ? .green : .red
+        let suffVal:     String = sufficiencyDay.map { "Day \($0)" } ?? "Not in 90d"
+        let suffColor:   Color  = sufficiencyDay != nil ? .green : .red
+        HStack(spacing: 10) {
+            StatMiniCard(
+                label: "Avg SED (\(windowDays)d)",
+                value: String(format: "%.4f", avgSED),
+                color: .orange)
+            StatMiniCard(
+                label: "Escapes deficiency",
+                sublabel: "(≥30 nmol/L)",
+                value: escapeVal,
+                color: escapeColor)
+            StatMiniCard(
+                label: "Reaches sufficiency",
+                sublabel: "(≥50 nmol/L)",
+                value: suffVal,
+                color: suffColor)
+        }.padding(.horizontal)
+    }
+}
+
+struct ProjectionLegend: View {
+    let hasDiff: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 14) {
+                HStack(spacing: 5) {
+                    Rectangle().fill(Color.teal).frame(width: 16, height: 2.5)
+                    Text("Observed (corrected)")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+                HStack(spacing: 5) {
+                    HStack(spacing: 2) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            Rectangle().fill(Color.teal).frame(width: 4, height: 2.5)
+                        }
+                    }
+                    Text("Projected (corrected)")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }
+            HStack(spacing: 14) {
+                HStack(spacing: 5) {
+                    Rectangle().fill(Color.gray.opacity(0.5)).frame(width: 16, height: 2)
+                    Text("Observed (auto only)")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+                HStack(spacing: 5) {
+                    HStack(spacing: 2) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            Rectangle().fill(Color.gray.opacity(0.5)).frame(width: 4, height: 2)
+                        }
+                    }
+                    Text("Projected (auto only)")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+                if !hasDiff {
+                    Text("· lines identical")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }
+        }.padding(.horizontal)
+    }
+}
+
 struct StatMiniCard: View {
     let label:    String
     var sublabel: String? = nil
     let value:    String
     let color:    Color
+    @ViewBuilder
+    private var projectionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("90-Day Projection")
+                .font(.headline).padding(.horizontal)
+
+            // Window picker
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Average over most recent:")
+                    .font(.caption).foregroundColor(.secondary)
+                HStack(spacing: 8) {
+                    ForEach([7, 14, 21, 30], id: \.self) { days in
+                        ProjectionWindowButton(
+                            days: days,
+                            selected: projectionWindow == days
+                        ) { projectionWindow = days }
+                    }
+                    Spacer()
+                    Text("(\(actualWindowDays) days data)")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }.padding(.horizontal)
+
+            // C0 row
+            ProjectionC0Row(level: store.profile.initialLevel)
+
+            // Stats + chart
+            if projectedCorrected.isEmpty {
+                Text("Track at least one day to generate a projection.")
+                    .font(.caption).foregroundColor(.secondary).padding()
+            } else {
+                ProjectionStatsRow(
+                    avgSED:         windowAvgSED,
+                    windowDays:     actualWindowDays,
+                    escapeDay:      daysToEscapeDeficiency,
+                    sufficiencyDay: daysToSufficiency)
+
+                ProjectionChart(
+                    observed:     observedCorrected,
+                    observedRaw:  observedRaw,
+                    projected:    projectedCorrected,
+                    projectedRaw: projectionsHaveDiff ? projectedRaw : nil,
+                    startDate:    longitudinalData.first?.date ?? Date(),
+                    endDate:      projectionEndDate)
+                    .frame(height: 260).padding(.horizontal)
+
+                ProjectionLegend(hasDiff: projectionsHaveDiff)
+
+                Text("14d window recommended — matches 25-day plasma half-life.")
+                    .font(.caption2).foregroundColor(.secondary)
+                    .padding(.horizontal)
+            }
+        }
+        .padding(.vertical)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(16).padding(.horizontal)
+    }
+
     var body: some View {
         VStack(spacing: 3) {
             Text(label).font(.caption2).foregroundColor(.secondary)
@@ -367,6 +512,64 @@ struct LongitudinalLineChart: View {
         guard let last = data.last else { return "" }
         let fmt = DateFormatter(); fmt.dateFormat = "MMM d"
         return fmt.string(from: last.date)
+    }
+
+    @ViewBuilder
+    private var projectionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("90-Day Projection")
+                .font(.headline).padding(.horizontal)
+
+            // Window picker
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Average over most recent:")
+                    .font(.caption).foregroundColor(.secondary)
+                HStack(spacing: 8) {
+                    ForEach([7, 14, 21, 30], id: \.self) { days in
+                        ProjectionWindowButton(
+                            days: days,
+                            selected: projectionWindow == days
+                        ) { projectionWindow = days }
+                    }
+                    Spacer()
+                    Text("(\(actualWindowDays) days data)")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }.padding(.horizontal)
+
+            // C0 row
+            ProjectionC0Row(level: store.profile.initialLevel)
+
+            // Stats + chart
+            if projectedCorrected.isEmpty {
+                Text("Track at least one day to generate a projection.")
+                    .font(.caption).foregroundColor(.secondary).padding()
+            } else {
+                ProjectionStatsRow(
+                    avgSED:         windowAvgSED,
+                    windowDays:     actualWindowDays,
+                    escapeDay:      daysToEscapeDeficiency,
+                    sufficiencyDay: daysToSufficiency)
+
+                ProjectionChart(
+                    observed:     observedCorrected,
+                    observedRaw:  observedRaw,
+                    projected:    projectedCorrected,
+                    projectedRaw: projectionsHaveDiff ? projectedRaw : nil,
+                    startDate:    longitudinalData.first?.date ?? Date(),
+                    endDate:      projectionEndDate)
+                    .frame(height: 260).padding(.horizontal)
+
+                ProjectionLegend(hasDiff: projectionsHaveDiff)
+
+                Text("14d window recommended — matches 25-day plasma half-life.")
+                    .font(.caption2).foregroundColor(.secondary)
+                    .padding(.horizontal)
+            }
+        }
+        .padding(.vertical)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(16).padding(.horizontal)
     }
 
     var body: some View {
@@ -444,6 +647,64 @@ struct ProjectionChart: View {
     }
     func lineColor(_ v: Double) -> Color {
         v < 30 ? .red : v < 50 ? .orange : .green
+    }
+
+    @ViewBuilder
+    private var projectionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("90-Day Projection")
+                .font(.headline).padding(.horizontal)
+
+            // Window picker
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Average over most recent:")
+                    .font(.caption).foregroundColor(.secondary)
+                HStack(spacing: 8) {
+                    ForEach([7, 14, 21, 30], id: \.self) { days in
+                        ProjectionWindowButton(
+                            days: days,
+                            selected: projectionWindow == days
+                        ) { projectionWindow = days }
+                    }
+                    Spacer()
+                    Text("(\(actualWindowDays) days data)")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }.padding(.horizontal)
+
+            // C0 row
+            ProjectionC0Row(level: store.profile.initialLevel)
+
+            // Stats + chart
+            if projectedCorrected.isEmpty {
+                Text("Track at least one day to generate a projection.")
+                    .font(.caption).foregroundColor(.secondary).padding()
+            } else {
+                ProjectionStatsRow(
+                    avgSED:         windowAvgSED,
+                    windowDays:     actualWindowDays,
+                    escapeDay:      daysToEscapeDeficiency,
+                    sufficiencyDay: daysToSufficiency)
+
+                ProjectionChart(
+                    observed:     observedCorrected,
+                    observedRaw:  observedRaw,
+                    projected:    projectedCorrected,
+                    projectedRaw: projectionsHaveDiff ? projectedRaw : nil,
+                    startDate:    longitudinalData.first?.date ?? Date(),
+                    endDate:      projectionEndDate)
+                    .frame(height: 260).padding(.horizontal)
+
+                ProjectionLegend(hasDiff: projectionsHaveDiff)
+
+                Text("14d window recommended — matches 25-day plasma half-life.")
+                    .font(.caption2).foregroundColor(.secondary)
+                    .padding(.horizontal)
+            }
+        }
+        .padding(.vertical)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(16).padding(.horizontal)
     }
 
     var body: some View {
@@ -526,6 +787,64 @@ struct CombinedContributionCard: View {
     var netGain: Double { max(0.01, uvContrib + oralContrib) }
     var uvPct:   Double { uvContrib   / netGain * 100 }
     var orPct:   Double { oralContrib / netGain * 100 }
+
+    @ViewBuilder
+    private var projectionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("90-Day Projection")
+                .font(.headline).padding(.horizontal)
+
+            // Window picker
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Average over most recent:")
+                    .font(.caption).foregroundColor(.secondary)
+                HStack(spacing: 8) {
+                    ForEach([7, 14, 21, 30], id: \.self) { days in
+                        ProjectionWindowButton(
+                            days: days,
+                            selected: projectionWindow == days
+                        ) { projectionWindow = days }
+                    }
+                    Spacer()
+                    Text("(\(actualWindowDays) days data)")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }.padding(.horizontal)
+
+            // C0 row
+            ProjectionC0Row(level: store.profile.initialLevel)
+
+            // Stats + chart
+            if projectedCorrected.isEmpty {
+                Text("Track at least one day to generate a projection.")
+                    .font(.caption).foregroundColor(.secondary).padding()
+            } else {
+                ProjectionStatsRow(
+                    avgSED:         windowAvgSED,
+                    windowDays:     actualWindowDays,
+                    escapeDay:      daysToEscapeDeficiency,
+                    sufficiencyDay: daysToSufficiency)
+
+                ProjectionChart(
+                    observed:     observedCorrected,
+                    observedRaw:  observedRaw,
+                    projected:    projectedCorrected,
+                    projectedRaw: projectionsHaveDiff ? projectedRaw : nil,
+                    startDate:    longitudinalData.first?.date ?? Date(),
+                    endDate:      projectionEndDate)
+                    .frame(height: 260).padding(.horizontal)
+
+                ProjectionLegend(hasDiff: projectionsHaveDiff)
+
+                Text("14d window recommended — matches 25-day plasma half-life.")
+                    .font(.caption2).foregroundColor(.secondary)
+                    .padding(.horizontal)
+            }
+        }
+        .padding(.vertical)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(16).padding(.horizontal)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
