@@ -463,6 +463,8 @@ class DataStore: ObservableObject {
                 oralContrib: oralContrib)
         }
     }
+
+
     func rawLongitudinalModel(daysBack: Int) -> [DayModelResult] {
 
     let cal = Calendar.current
@@ -523,6 +525,172 @@ class DataStore: ObservableObject {
         )
     }
     }
+
+    func exportProjectionCSVs() {
+
+    guard let dir = FileManager.default.urls(
+        for: .documentDirectory,
+        in: .userDomainMask
+    ).first else {
+        return
+    }
+
+    let historyCorrected =
+        longitudinalModel(daysBack: 365)
+
+    let historyRaw =
+        rawLongitudinalModel(daysBack: 365)
+
+    // ---------- history_corrected.csv ----------
+
+    do {
+        let file =
+            dir.appendingPathComponent(
+                "history_corrected.csv"
+            )
+
+        var csv =
+            "date,total_nmol_l,uv_contrib,oral_contrib\n"
+
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+
+        for row in historyCorrected {
+            csv +=
+                "\(fmt.string(from: row.date))," +
+                "\(row.total)," +
+                "\(row.uvContrib)," +
+                "\(row.oralContrib)\n"
+        }
+
+        try csv.write(
+            to: file,
+            atomically: true,
+            encoding: .utf8
+        )
+    } catch {
+        print("history_corrected export failed:", error)
+    }
+
+    // ---------- history_raw.csv ----------
+
+    do {
+        let file =
+            dir.appendingPathComponent(
+                "history_raw.csv"
+            )
+
+        var csv =
+            "date,total_nmol_l,uv_contrib,oral_contrib\n"
+
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+
+        for row in historyRaw {
+            csv +=
+                "\(fmt.string(from: row.date))," +
+                "\(row.total)," +
+                "\(row.uvContrib)," +
+                "\(row.oralContrib)\n"
+        }
+
+        try csv.write(
+            to: file,
+            atomically: true,
+            encoding: .utf8
+        )
+    } catch {
+        print("history_raw export failed:", error)
+    }
+
+    // ---------- projection_corrected.csv ----------
+
+    do {
+
+        let projectionWindow = 14
+
+        let aggs = longitudinalModel(daysBack: projectionWindow)
+
+        let c0 =
+            aggs.last?.total ??
+            profile.initialLevel
+
+        let corrected =
+            VitaminDEngine.runModel(
+                oralDoses: Array(repeating: dailyOralUg(),
+                                 count: 90),
+                uvDoses: Array(
+                    repeating:
+                        aggs.map{$0.uvContrib}
+                            .reduce(0,+)
+                        / max(1, Double(aggs.count)),
+                    count: 90
+                ),
+                bodyAreas: Array(
+                    repeating: profile.clothing.bsaPercent,
+                    count: 90
+                ),
+                age: profile.age,
+                skinType: profile.skinType,
+                C0: c0
+            )
+
+        let file =
+            dir.appendingPathComponent(
+                "projection_corrected.csv"
+            )
+
+        var csv =
+            "day,plasma_nmol_l\n"
+
+        for (idx,val) in corrected.enumerated() {
+            csv += "\(idx+1),\(val)\n"
+        }
+
+        try csv.write(
+            to: file,
+            atomically: true,
+            encoding: .utf8
+        )
+
+    } catch {
+        print("projection_corrected export failed:", error)
+    }
+
+    // ---------- projection_raw.csv ----------
+
+    do {
+
+        let raw =
+            rawAutoProjection(
+                windowDays: 14
+            )
+
+        let file =
+            dir.appendingPathComponent(
+                "projection_raw.csv"
+            )
+
+        var csv =
+            "day,plasma_nmol_l\n"
+
+        for (idx,val) in raw.enumerated() {
+            csv += "\(idx+1),\(val)\n"
+        }
+
+        try csv.write(
+            to: file,
+            atomically: true,
+            encoding: .utf8
+        )
+
+    } catch {
+        print("projection_raw export failed:", error)
+    }
+
+    print("CSV export complete")
+    }
+
     // ── Helpers ──────────────────────────────────────────────────
 
     // Haversine distance in metres between two GPS coordinates.
