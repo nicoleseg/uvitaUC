@@ -25,9 +25,10 @@ struct InsightsView: View {
 
     var projWindowDays: [ProjDay] {
 
-        let aggs = store.studyWindowAggregates(
-            days: projectionWindow
-        )
+        let aggs =
+            store.studyWindowAggregates(
+                days: projectionWindow
+            )
 
         return aggs.map {
             ProjDay(

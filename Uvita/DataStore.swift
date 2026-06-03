@@ -81,6 +81,7 @@ class DataStore: ObservableObject {
         todayReadings.reduce(0) { $0 + $1.sed }
     }
 
+
     // Daily oral intake resolved from the active source.
     // Food log entries are only counted if oralSource == .manualLog.
     // This ensures only one source is active at a time — if the
@@ -114,7 +115,7 @@ class DataStore: ObservableObject {
     //
     // This matches Eq. 8 where T indexes calendar days.
 
-    private struct DayAggregate {
+    struct DayAggregate {
         let date:     Date
         let uvDose:   Double   // sum of per-reading SEDs
         let oralDose: Double   // daily oral µg
@@ -1021,7 +1022,7 @@ class DataStore: ObservableObject {
     // Haversine distance in metres between two GPS coordinates.
     // Used to distinguish duplicate readings (same spot, < 30m)
     // from legitimate movement readings (moved 50m+).
-    private func studyWindowAggregates(days: Int) -> [DayAggregate] {
+    func studyWindowAggregates(days: Int) -> [DayAggregate] {
 
         guard let startDate = profile.studyStartDate else {
             return []
@@ -1079,7 +1080,44 @@ class DataStore: ObservableObject {
         return result
     }
 
-    private func rawStudyWindowAggregates(days: Int) -> [DayAggregate] {
+    struct ProjectionWindowStats {
+        let avgSED: Double
+        let avgOral: Double
+        let avgBSA: Double
+        let dayCount: Int
+    }
+
+    func projectionWindowStats(days: Int) -> ProjectionWindowStats {
+
+        let aggs = studyWindowAggregates(days: days)
+
+        guard !aggs.isEmpty else {
+            return ProjectionWindowStats(
+                avgSED: 0,
+                avgOral: 0,
+                avgBSA: 0,
+                dayCount: 0
+            )
+        }
+
+        return ProjectionWindowStats(
+            avgSED:
+                aggs.map { $0.uvDose }.reduce(0,+)
+                / Double(aggs.count),
+
+            avgOral:
+                aggs.map { $0.oralDose }.reduce(0,+)
+                / Double(aggs.count),
+
+            avgBSA:
+                aggs.map { $0.bsa }.reduce(0,+)
+                / Double(aggs.count),
+
+            dayCount: aggs.count
+        )
+    }
+
+    func rawStudyWindowAggregates(days: Int) -> [DayAggregate] {
 
         guard let startDate = profile.studyStartDate else {
             return []
