@@ -205,6 +205,8 @@ struct InsightsView: View {
                             }.padding(.horizontal)
 
                             // C0 read-only — edit in Profile
+                            let c0Color: Color = store.profile.initialLevel < 30
+                                ? .red : store.profile.initialLevel < 50 ? .orange : .green
                             HStack {
                                 Text("Starting plasma (C₀)")
                                     .font(.caption).foregroundColor(.secondary)
@@ -212,9 +214,7 @@ struct InsightsView: View {
                                 Text(String(format: "%.0f nmol/L",
                                             store.profile.initialLevel))
                                     .font(.caption).fontWeight(.semibold)
-                                    .foregroundColor(store.profile.initialLevel < 30
-                                        ? .red : store.profile.initialLevel < 50
-                                        ? .orange : .green)
+                                    .foregroundColor(c0Color)
                                 Text("· set in Profile")
                                     .font(.caption2).foregroundColor(.secondary)
                             }.padding(.horizontal)
@@ -592,23 +592,26 @@ struct CombinedContributionCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 VStack(alignment: .trailing, spacing: 1) {
+                    let totalColor: Color = total < 30 ? .red : total < 50 ? .orange : .green
                     Text("Total level").font(.caption2).foregroundColor(.secondary)
                     Text(String(format: "%.1f nmol/L", total))
                         .font(.caption).fontWeight(.semibold)
-                        .foregroundColor(total < 30 ? .red : total < 50 ? .orange : .green)
+                        .foregroundColor(totalColor)
                 }
             }
 
             // Context note
+            let uvColor: Color  = uvPct > 60 ? .green : .orange
+            let uvIcon: String  = uvPct > 60 ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
+            let uvText: String  = uvPct > 60
+                ? "UV dominant — matches literature (73–98%)"
+                : "Oral dominant — possibly limited UV exposure recently"
             HStack(spacing: 4) {
-                Image(systemName: uvPct > 60
-                    ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    .font(.caption).foregroundColor(uvPct > 60 ? .green : .orange)
-                Text(uvPct > 60
-                     ? "UV dominant — matches literature (73–98%)"
-                     : "Oral dominant — possibly limited UV exposure recently")
+                Image(systemName: uvIcon)
+                    .font(.caption).foregroundColor(uvColor)
+                Text(uvText)
                     .font(.caption2)
-                    .foregroundColor(uvPct > 60 ? .green : .orange)
+                    .foregroundColor(uvColor)
             }
         }
         .padding()
