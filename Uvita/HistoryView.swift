@@ -88,7 +88,10 @@ struct HistoryView: View {
                             .padding(.horizontal).padding(.vertical, 10)
 
                             ForEach(longitudinalData, id: \.date) { day in
-                                DayHistoryRow(day: day)
+                                DayHistoryRow(
+                                    day: day,
+                                    longitudinalData: longitudinalData
+                                )
                                 Divider().padding(.horizontal)
                             }
                         }
@@ -120,7 +123,7 @@ struct HistoryView: View {
 struct DayHistoryRow: View {
     @EnvironmentObject var store: DataStore
     let day: DataStore.DayModelResult
-
+    let longitudinalData: [DataStore.DayModelResult]
     var readingsForDay: [DayReading] {
         let cal = Calendar.current
         return store.readings
@@ -235,8 +238,7 @@ struct DayHistoryRow: View {
         v < 30 ? .red : v < 50 ? .orange : .green
     }
     var displayedPlasma: Double {
-        let history =
-            store.longitudinalModel(daysBack: 365)
+        let history = longitudinalData
 
         guard let idx =
             history.firstIndex(where: {

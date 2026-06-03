@@ -174,10 +174,30 @@ class DataStore: ObservableObject {
                 var uvDose = 0.0
 
                 guard !sortedReadings.isEmpty else {
+
+                    let oral: Double
+
+                    switch profile.oralSource {
+
+                    case .manualLog:
+
+                        let dayFoodLog = foodLog.filter {
+                            cal.isDate($0.date, inSameDayAs: day)
+                        }
+
+                        oral = dayFoodLog.reduce(0) {
+                            $0 + $1.vitaminDug
+                        }
+
+                    default:
+
+                        oral = profile.supplementOralUg
+                    }
+
                     return DayAggregate(
                         date: day,
                         uvDose: 0,
-                        oralDose: 0,
+                        oralDose: oral,
                         bsa: profile.clothing.bsaPercent
                     )
                 }
@@ -378,7 +398,34 @@ class DataStore: ObservableObject {
                     rds.sorted { $0.date < $1.date }
 
                 var uvDose = 0.0
+                guard !sortedReadings.isEmpty else {
 
+                    let oral: Double
+
+                    switch profile.oralSource {
+
+                    case .manualLog:
+
+                        let dayFoodLog = foodLog.filter {
+                            cal.isDate($0.date, inSameDayAs: day)
+                        }
+
+                        oral = dayFoodLog.reduce(0) {
+                            $0 + $1.vitaminDug
+                        }
+
+                    default:
+
+                        oral = profile.supplementOralUg
+                    }
+
+                    return DayAggregate(
+                        date: day,
+                        uvDose: 0,
+                        oralDose: oral,
+                        bsa: profile.clothing.bsaPercent
+                    )
+                }
                 for i in 1..<sortedReadings.count {
 
                     let prev = sortedReadings[i - 1]
@@ -634,11 +681,30 @@ class DataStore: ObservableObject {
                 }) {
                 aggs.append(existing)
             } else {
+                let oral: Double
+
+                switch profile.oralSource {
+
+                case .manualLog:
+
+                    oral = foodLog
+                        .filter {
+                            cal.isDate($0.date, inSameDayAs: date)
+                        }
+                        .reduce(0) {
+                            $0 + $1.vitaminDug
+                        }
+
+                default:
+
+                    oral = profile.supplementOralUg
+                }
+
                 aggs.append(
                     DayAggregate(
                         date: date,
                         uvDose: 0,
-                        oralDose: 0,
+                        oralDose: oral,
                         bsa: profile.clothing.bsaPercent
                     )
                 )
@@ -711,11 +777,30 @@ class DataStore: ObservableObject {
 
         } else {
 
+            let oral: Double
+
+            switch profile.oralSource {
+
+            case .manualLog:
+
+                oral = foodLog
+                    .filter {
+                        cal.isDate($0.date, inSameDayAs: date)
+                    }
+                    .reduce(0) {
+                        $0 + $1.vitaminDug
+                    }
+
+            default:
+
+                oral = profile.supplementOralUg
+            }
+
             aggs.append(
                 DayAggregate(
                     date: date,
                     uvDose: 0,
-                    oralDose: 0,
+                    oralDose: oral,
                     bsa: profile.clothing.bsaPercent
                 )
             )
