@@ -220,6 +220,10 @@ struct InsightsView: View {
                             }.padding(.horizontal)
 
                             if !projectedCorrected.isEmpty {
+                                let escapeVal   = daysToEscapeDeficiency.map { "Day \($0)" } ?? "Not in 90d"
+                                let escapeColor: Color = daysToEscapeDeficiency != nil ? .green : .red
+                                let suffVal     = daysToSufficiency.map { "Day \($0)" } ?? "Not in 90d"
+                                let suffColor: Color   = daysToSufficiency != nil ? .green : .red
                                 HStack(spacing: 10) {
                                     StatMiniCard(
                                         label: "Avg SED (\(actualWindowDays)d)",
@@ -228,13 +232,13 @@ struct InsightsView: View {
                                     StatMiniCard(
                                         label: "Escapes deficiency",
                                         sublabel: "(≥30 nmol/L)",
-                                        value: daysToEscapeDeficiency.map { "Day \($0)" } ?? "Not in 90d",
-                                        color: daysToEscapeDeficiency != nil ? .green : .red)
+                                        value: escapeVal,
+                                        color: escapeColor)
                                     StatMiniCard(
                                         label: "Reaches sufficiency",
                                         sublabel: "(≥50 nmol/L)",
-                                        value: daysToSufficiency.map { "Day \($0)" } ?? "Not in 90d",
-                                        color: daysToSufficiency != nil ? .green : .red)
+                                        value: suffVal,
+                                        color: suffColor)
                                 }.padding(.horizontal)
 
                                 ProjectionChart(
