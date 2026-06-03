@@ -428,8 +428,24 @@ class DataStore: ObservableObject {
                         )
                     }
                 }
-                let oral = rds.sorted { $0.date < $1.date }
-                               .last?.oralUg ?? profile.supplementOralUg
+                let oral: Double
+
+                switch profile.oralSource {
+
+                case .manualLog:
+
+                    let dayFoodLog = foodLog.filter {
+                        cal.isDate($0.date, inSameDayAs: day)
+                    }
+
+                    oral = dayFoodLog.reduce(0) {
+                        $0 + $1.vitaminDug
+                    }
+
+                default:
+
+                    oral = profile.supplementOralUg
+                }
                 let bsa  = rds.sorted { $0.date < $1.date }
                                .last?.bsaPercent ?? profile.clothing.bsaPercent
                 return DayAggregate(date: day, uvDose: uvDose,
@@ -541,8 +557,8 @@ class DataStore: ObservableObject {
 
     func rawAutoProjection(windowDays: Int) -> [Double] {
 
-            let aggs = buildRawDayAggregates()
-            let window = Array(aggs.suffix(windowDays))
+            let window =
+                rawStudyWindowAggregates(days: windowDays)
 
             guard !window.isEmpty else {
                 return []
@@ -601,14 +617,6 @@ class DataStore: ObservableObject {
         let cal = Calendar.current
         let start = cal.startOfDay(for: startDate)
 
-        guard let end = cal.date(
-            byAdding: .day,
-            value: daysBack - 1,
-            to: start
-        ) else {
-            return []
-        }
-
         let existingAggs = buildDayAggregates()
         var aggs: [DayAggregate] = []
 
@@ -640,13 +648,6 @@ class DataStore: ObservableObject {
         let n = aggs.count
         let totals = VitaminDEngine.runModel(
             oralDoses: aggs.map { $0.oralDose },
-            uvDoses:   aggs.map { $0.uvDose },
-            bodyAreas: aggs.map { $0.bsa },
-            age: profile.age, skinType: profile.skinType,
-            C0: profile.initialLevel)
-
-        let uvOnly = VitaminDEngine.runModel(
-            oralDoses: Array(repeating: 0, count: n),
             uvDoses:   aggs.map { $0.uvDose },
             bodyAreas: aggs.map { $0.bsa },
             age: profile.age, skinType: profile.skinType,
@@ -687,15 +688,7 @@ class DataStore: ObservableObject {
         let cal = Calendar.current
         let start = cal.startOfDay(for: startDate)
 
-        guard let end = cal.date(
-            byAdding: .day,
-            value: daysBack - 1,
-            to: start
-        ) else {
-            return []
-        }
-
-    let existingAggs = buildRawDayAggregates()
+        let existingAggs = buildRawDayAggregates()
 
     var aggs: [DayAggregate] = []
 
@@ -731,15 +724,6 @@ class DataStore: ObservableObject {
 
     let totals = VitaminDEngine.runModel(
         oralDoses: aggs.map { $0.oralDose },
-        uvDoses: aggs.map { $0.uvDose },
-        bodyAreas: aggs.map { $0.bsa },
-        age: profile.age,
-        skinType: profile.skinType,
-        C0: profile.initialLevel
-    )
-
-    let uvOnly = VitaminDEngine.runModel(
-        oralDoses: Array(repeating: 0, count: aggs.count),
         uvDoses: aggs.map { $0.uvDose },
         bodyAreas: aggs.map { $0.bsa },
         age: profile.age,
@@ -855,7 +839,7 @@ class DataStore: ObservableObject {
         let futureDays = max(0, 90 - projectionWindow)
 
         let recentAggs =
-            Array(buildDayAggregates().suffix(projectionWindow))
+            studyWindowAggregates(days: projectionWindow)
 
         let observed =
             longitudinalModel(daysBack: projectionWindow)
@@ -898,7 +882,7 @@ class DataStore: ObservableObject {
             "day,plasma_nmol_l\n"
 
         for (idx,val) in corrected.enumerated() {
-            csv += "\(idx+1),\(val)\n"
+            csv += "\(projectionWindow + idx + 1),\(val)\n"
         }
 
         try csv.write(
@@ -952,7 +936,8 @@ class DataStore: ObservableObject {
     // Haversine distance in metres between two GPS coordinates.
     // Used to distinguish duplicate readings (same spot, < 30m)
     // from legitimate movement readings (moved 50m+).
-    private func studyWindowAggregates() -> [DayAggregate] {
+    private func studyWindowAggregates(days: Int) -> [DayAggregate] {
+
         guard let startDate = profile.studyStartDate else {
             return []
         }
@@ -960,20 +945,116 @@ class DataStore: ObservableObject {
         let cal = Calendar.current
         let start = cal.startOfDay(for: startDate)
 
-        guard let end = cal.date(
-            byAdding: .day,
-            value: 6,
-            to: start
-        ) else {
+        let existingAggs = buildDayAggregates()
+
+        var result: [DayAggregate] = []
+
+        for offset in 0..<days {
+
+            guard let date =
+                cal.date(
+                    byAdding: .day,
+                    value: offset,
+                    to: start
+                )
+            else { continue }
+
+            if let existing =
+                existingAggs.first(where: {
+                    cal.isDate($0.date, inSameDayAs: date)
+                }) {
+
+                result.append(existing)
+
+            } else {
+                let oral: Double
+                switch profile.oralSource {
+                case .manualLog:
+                    oral = foodLog
+                        .filter {
+                            cal.isDate($0.date, inSameDayAs: date)
+                        }
+                        .reduce(0) {
+                            $0 + $1.vitaminDug
+                        }
+                default:
+                    oral = profile.supplementOralUg
+                }
+                result.append(
+                    DayAggregate(
+                        date: date,
+                        uvDose: 0,
+                        oralDose: oral,
+                        bsa: profile.clothing.bsaPercent
+                    )
+                )
+            }
+        }
+
+        return result
+    }
+
+    private func rawStudyWindowAggregates(days: Int) -> [DayAggregate] {
+
+        guard let startDate = profile.studyStartDate else {
             return []
         }
 
-        return buildDayAggregates()
-            .filter {
-                $0.date >= start &&
-                $0.date <= end
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: startDate)
+
+        let existingAggs = buildRawDayAggregates()
+
+        var result: [DayAggregate] = []
+
+        for offset in 0..<days {
+
+            guard let date =
+                cal.date(
+                    byAdding: .day,
+                    value: offset,
+                    to: start
+                )
+            else { continue }
+
+            if let existing =
+                existingAggs.first(where: {
+                    cal.isDate($0.date, inSameDayAs: date)
+                }) {
+
+                result.append(existing)
+
+            } else {
+                let oral: Double
+                switch profile.oralSource {
+                case .manualLog:
+                    oral = foodLog
+                        .filter {
+                            cal.isDate($0.date, inSameDayAs: date)
+                        }
+                        .reduce(0) {
+                            $0 + $1.vitaminDug
+                        }
+
+                default:
+
+                    oral = profile.supplementOralUg
+                }
+
+                result.append(
+                    DayAggregate(
+                        date: date,
+                        uvDose: 0,
+                        oralDose: oral,
+                        bsa: profile.clothing.bsaPercent
+                    )
+                )
             }
+        }
+
+        return result
     }
+
     private func haversineDistance(lat1: Double, lon1: Double,
                                     lat2: Double, lon2: Double) -> Double {
         let R   = 6371000.0  // Earth radius in metres
