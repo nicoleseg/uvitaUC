@@ -60,7 +60,9 @@ class DataStore: ObservableObject {
 
     func clearAll() {
         readings = []
+        foodLog = []
         saveReadings()
+        saveFoodLog()
     }
 
     // ── Today helpers ────────────────────────────────────────
@@ -868,13 +870,10 @@ class DataStore: ObservableObject {
         fmt.timeZone = TimeZone(secondsFromGMT: 0)
 
         // If food log already has entries, skip recovery entirely
-        // Running on every launch was causing duplicates
-        guard foodLog.isEmpty else {
-            print("Recovery: food log already populated (\(foodLog.count) entries) — skipping")
-            return
-        }
-        let existingTS: Set<String> = []  // foodLog is empty so no existing timestamps
-
+        var existingTS: Set<String> =
+            Set(foodLog.map {
+                fmt.string(from: $0.date)
+        })
         var recovered = 0
 
         for file in files {
@@ -914,6 +913,7 @@ class DataStore: ObservableObject {
                     date:        date)
 
                 foodLog.append(entry)
+                existingTS.insert(tsStr)
                 recovered += 1
                 print("Recovery: added \(name) \(vitD)µg")
             }
