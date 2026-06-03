@@ -609,12 +609,33 @@ class DataStore: ObservableObject {
             return []
         }
 
-        let aggs = buildDayAggregates()
-            .filter {
-                $0.date >= start &&
-                $0.date <= end
+        let existingAggs = buildDayAggregates()
+        var aggs: [DayAggregate] = []
+
+        for offset in 0..<daysBack {
+            guard let date =
+                cal.date(
+                    byAdding: .day,
+                    value: offset,
+                    to: start
+                )
+            else { continue }
+            if let existing =
+                existingAggs.first(where: {
+                    cal.isDate($0.date, inSameDayAs: date)
+                }) {
+                aggs.append(existing)
+            } else {
+                aggs.append(
+                    DayAggregate(
+                        date: date,
+                        uvDose: 0,
+                        oralDose: 0,
+                        bsa: profile.clothing.bsaPercent
+                    )
+                )
             }
-        guard !aggs.isEmpty else { return [] }
+        }
 
         let n = aggs.count
         let totals = VitaminDEngine.runModel(
@@ -674,14 +695,38 @@ class DataStore: ObservableObject {
             return []
         }
 
-        let aggs = buildRawDayAggregates()
-            .filter {
-                $0.date >= start &&
-                $0.date <= end
-            }
+    let existingAggs = buildRawDayAggregates()
 
-    guard !aggs.isEmpty else {
-        return []
+    var aggs: [DayAggregate] = []
+
+    for offset in 0..<daysBack {
+
+        guard let date =
+            cal.date(
+                byAdding: .day,
+                value: offset,
+                to: start
+            )
+        else { continue }
+
+        if let existing =
+            existingAggs.first(where: {
+                cal.isDate($0.date, inSameDayAs: date)
+            }) {
+
+            aggs.append(existing)
+
+        } else {
+
+            aggs.append(
+                DayAggregate(
+                    date: date,
+                    uvDose: 0,
+                    oralDose: 0,
+                    bsa: profile.clothing.bsaPercent
+                )
+            )
+        }
     }
 
     let totals = VitaminDEngine.runModel(
