@@ -24,27 +24,17 @@ struct InsightsView: View {
     struct ProjDay { let uvDose, oralDose, bsa: Double }
 
     var projWindowDays: [ProjDay] {
-        let cal = Calendar.current
-        var dayMap: [Date: (uv: Double, bsa: Double)] = [:]
-        for r in store.readings where r.label == nil {
-            let day = cal.startOfDay(for: r.date)
-            dayMap[day] = (uv: (dayMap[day]?.uv ?? 0) + r.sed,
-                           bsa: r.bsaPercent)
-        }
-        // Resolve oral from food log (same logic as buildDayAggregates)
-        // so projection uses actual logged food, not stale snapshots
-        return Array(dayMap.keys.sorted().suffix(projectionWindow)).map { day in
-            let uvBsa = dayMap[day]!
-            let oral: Double
-            switch store.profile.oralSource {
-            case .manualLog:
-                oral = store.foodLog
-                    .filter { cal.isDate($0.date, inSameDayAs: day) }
-                    .reduce(0) { $0 + $1.vitaminDug }
-            default:
-                oral = store.profile.supplementOralUg
-            }
-            return ProjDay(uvDose: uvBsa.uv, oralDose: oral, bsa: uvBsa.bsa)
+
+        let aggs = store.studyWindowAggregates(
+            days: projectionWindow
+        )
+
+        return aggs.map {
+            ProjDay(
+                uvDose: $0.uvDose,
+                oralDose: $0.oralDose,
+                bsa: $0.bsa
+            )
         }
     }
 
@@ -126,7 +116,10 @@ struct InsightsView: View {
                 }
             }.padding(.horizontal)
 
-            ProjectionC0Row(level: store.profile.initialLevel)
+            ProjectionC0Row(
+                level: observedCorrected.last
+                    ?? store.profile.initialLevel
+            )
 
             if projectedCorrected.isEmpty {
                 Text("Track at least one day to generate a projection.")
