@@ -387,23 +387,20 @@ class DataStore: ObservableObject {
             : "\(corrections.count) corrections found — all already patched"
     }
 
-    func rawAutoProjection(windowDays: Int,
-                           C0override: Double? = nil,
-                           nDays: Int = 90) -> [Double] {
+    func rawAutoProjection(windowDays: Int) -> [Double] {
         let aggs = buildRawDayAggregates()
         let window = Array(aggs.suffix(windowDays))
         guard !window.isEmpty else { return [] }
         let avgSED  = window.map { $0.uvDose  }.reduce(0,+) / Double(window.count)
         let avgOral = window.map { $0.oralDose }.reduce(0,+) / Double(window.count)
         let avgBSA  = window.map { $0.bsa      }.reduce(0,+) / Double(window.count)
-        let C0      = C0override ?? profile.initialLevel
         return VitaminDEngine.runModel(
-            oralDoses: Array(repeating: avgOral, count: nDays),
-            uvDoses:   Array(repeating: avgSED,  count: nDays),
-            bodyAreas: Array(repeating: avgBSA,  count: nDays),
+            oralDoses: Array(repeating: avgOral, count: 90),
+            uvDoses:   Array(repeating: avgSED,  count: 90),
+            bodyAreas: Array(repeating: avgBSA,  count: 90),
             age:       profile.age,
             skinType:  profile.skinType,
-            C0:        C0)
+            C0:        profile.initialLevel)
     }
 
     // For InsightsView longitudinal chart — returns per-day
@@ -489,6 +486,12 @@ class DataStore: ObservableObject {
     // was wiped due to model incompatibility. Safe to call multiple
     // times — skips dates already present in readings[].
     func recoverReadingsFromCSV() {
+        // Only recover if readings are empty — prevents doubling on every launch
+        guard readings.isEmpty else {
+            print("Recovery: readings already populated (\(readings.count)) — skipping UV recovery")
+            recoverFoodLogFromCSV()  // still check food log separately
+            return
+        }
         guard let dir = FileManager.default.urls(
             for: .documentDirectory,
             in: .userDomainMask).first else { return }
@@ -637,8 +640,13 @@ class DataStore: ObservableObject {
         fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.timeZone = TimeZone(secondsFromGMT: 0)
 
-        // Existing timestamps to avoid duplicates
-        let existingTS = Set(foodLog.map { fmt.string(from: $0.date) })
+        // If food log already has entries, skip recovery entirely
+        // Running on every launch was causing duplicates
+        guard foodLog.isEmpty else {
+            print("Recovery: food log already populated (\(foodLog.count) entries) — skipping")
+            return
+        }
+        let existingTS: Set<String> = []  // foodLog is empty so no existing timestamps
 
         var recovered = 0
 
@@ -783,160 +791,6 @@ class DataStore: ObservableObject {
     func getMostExposedBodyPart() -> (String, Double) {
         getBodyPartSEDTotals()
             .max(by: { $0.1 < $1.1 }) ?? ("None", 0)
-    }
-
-    // ── Projection export ────────────────────────────────────
-    // Exports three CSVs to the app's Documents folder:
-    //   projection_corrected.csv  — 90-day model using corrected readings
-    //   projection_raw_auto.csv   — 90-day model using auto-detected only
-    //   observed_actuals.csv      — real per-day C_total from longitudinalModel
-    // Called from Profile → Data section.
-    func exportProjectionCSVs() {
-        guard let dir = FileManager.default.urls(
-            for: .documentDirectory,
-            in: .userDomainMask).first else { return }
-
-        let cal     = Calendar.current
-        let dateFmt = DateFormatter()
-        dateFmt.dateFormat = "yyyy-MM-dd"
-
-        // ── Observed actuals (corrected) ──────────────────────
-        let actuals    = longitudinalModel(daysBack: 365)
-        let rawActuals = rawLongitudinalModel(daysBack: 365)
-        guard !actuals.isEmpty else {
-            print("Export: no observed data")
-            return
-        }
-
-        // ── 7-day window averages for projection ──────────────
-        let corrAggs = buildDayAggregates()
-        let rawAggs  = buildRawDayAggregates()
-        let wCorr    = Array(corrAggs.suffix(7))
-        let wRaw     = Array(rawAggs.suffix(7))
-
-        let avgSEDCorr  = wCorr.isEmpty ? 0.0 : wCorr.map{$0.uvDose}.reduce(0,+)/Double(wCorr.count)
-        let avgOralCorr = wCorr.isEmpty ? 0.0 : wCorr.map{$0.oralDose}.reduce(0,+)/Double(wCorr.count)
-        let avgBSACorr  = wCorr.isEmpty ? 20.0: wCorr.map{$0.bsa}.reduce(0,+)/Double(wCorr.count)
-
-        let avgSEDRaw   = wRaw.isEmpty  ? 0.0 : wRaw.map{$0.uvDose}.reduce(0,+)/Double(wRaw.count)
-        let avgOralRaw  = wRaw.isEmpty  ? 0.0 : wRaw.map{$0.oralDose}.reduce(0,+)/Double(wRaw.count)
-        let avgBSARaw   = wRaw.isEmpty  ? 20.0: wRaw.map{$0.bsa}.reduce(0,+)/Double(wRaw.count)
-
-        // ── Project 90 days continuing from last observed day ─
-        // C0 for projection = last actual observed plasma level
-        let lastCorrPlasma = actuals.last?.total ?? profile.initialLevel
-        let lastRawPlasma  = rawActuals.last?.total ?? profile.initialLevel
-        let lastDate       = actuals.last?.date ?? Date()
-        let projDays       = 90 - actuals.count
-        let nProj          = max(1, projDays)
-
-        // Corrected projection continuing from last observed
-        let corrProjTotals = VitaminDEngine.runModel(
-            oralDoses: Array(repeating: avgOralCorr, count: nProj),
-            uvDoses:   Array(repeating: avgSEDCorr,  count: nProj),
-            bodyAreas: Array(repeating: avgBSACorr,  count: nProj),
-            age: profile.age, skinType: profile.skinType,
-            C0: lastCorrPlasma)
-        let corrProjOralOnly = VitaminDEngine.runModel(
-            oralDoses: Array(repeating: avgOralCorr, count: nProj),
-            uvDoses:   Array(repeating: 0.0,         count: nProj),
-            bodyAreas: Array(repeating: avgBSACorr,  count: nProj),
-            age: profile.age, skinType: profile.skinType,
-            C0: lastCorrPlasma)
-
-        // Raw projection continuing from last observed (raw)
-        let rawProjTotals = VitaminDEngine.runModel(
-            oralDoses: Array(repeating: avgOralRaw, count: nProj),
-            uvDoses:   Array(repeating: avgSEDRaw,  count: nProj),
-            bodyAreas: Array(repeating: avgBSARaw,  count: nProj),
-            age: profile.age, skinType: profile.skinType,
-            C0: lastRawPlasma)
-        let rawProjOralOnly = VitaminDEngine.runModel(
-            oralDoses: Array(repeating: avgOralRaw, count: nProj),
-            uvDoses:   Array(repeating: 0.0,        count: nProj),
-            bodyAreas: Array(repeating: avgBSARaw,  count: nProj),
-            age: profile.age, skinType: profile.skinType,
-            C0: lastRawPlasma)
-
-        // ── Build combined CSV ─────────────────────────────────
-        let header = "day,date,type," +
-            "plasma_corrected,uv_contrib_corrected,oral_contrib_corrected," +
-            "plasma_raw,uv_contrib_raw,oral_contrib_raw\n"
-        var csv = header
-
-        // Observed days — raw actuals come from rawLongitudinalModel
-        for (i, day) in actuals.enumerated() {
-            let rawDay   = i < rawActuals.count ? rawActuals[i] : day
-            let dayNum   = i + 1
-            let dateStr  = dateFmt.string(from: day.date)
-            csv += "\(dayNum),\(dateStr),observed,"
-            csv += "\(day.total),\(day.uvContrib),\(day.oralContrib),"
-            csv += "\(rawDay.total),\(rawDay.uvContrib),\(rawDay.oralContrib)\n"
-        }
-
-        // Projected days
-        for i in 0..<nProj {
-            let date    = cal.date(byAdding: .day, value: i+1, to: lastDate) ?? lastDate
-            let dayNum  = actuals.count + i + 1
-            let dateStr = dateFmt.string(from: date)
-            let cUV     = max(0, corrProjTotals[i] - corrProjOralOnly[i])
-            let cOral   = max(0, corrProjOralOnly[i] - lastCorrPlasma)
-            let rUV     = max(0, rawProjTotals[i]  - rawProjOralOnly[i])
-            let rOral   = max(0, rawProjOralOnly[i] - lastRawPlasma)
-            csv += "\(dayNum),\(dateStr),projected,"
-            csv += "\(corrProjTotals[i]),\(cUV),\(cOral),"
-            csv += "\(rawProjTotals[i]),\(rUV),\(rOral)\n"
-        }
-
-        write(csv: csv, to: dir.appendingPathComponent("uvita_projection_export.csv"))
-        print("Export: wrote uvita_projection_export.csv (\(actuals.count) observed + \(nProj) projected days)")
-    }
-
-    // Runs longitudinalModel using autoIndoorsResolved for raw comparison
-    func rawLongitudinalModel(daysBack: Int) -> [DayModelResult] {
-        let cal   = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        guard let cutoff = cal.date(
-            byAdding: .day, value: -(daysBack - 1), to: today)
-        else { return [] }
-
-        let aggs = buildRawDayAggregates()
-            .filter { $0.date >= cutoff }
-            .sorted { $0.date < $1.date }
-        guard !aggs.isEmpty else { return [] }
-
-        let oralDoses = aggs.map { $0.oralDose }
-        let uvDoses   = aggs.map { $0.uvDose   }
-        let bsas      = aggs.map { $0.bsa      }
-
-        let totals   = VitaminDEngine.runModel(
-            oralDoses: oralDoses, uvDoses: uvDoses, bodyAreas: bsas,
-            age: profile.age, skinType: profile.skinType,
-            C0: profile.initialLevel)
-        let oralOnly = VitaminDEngine.runModel(
-            oralDoses: oralDoses,
-            uvDoses:   Array(repeating: 0.0, count: aggs.count),
-            bodyAreas: bsas,
-            age: profile.age, skinType: profile.skinType,
-            C0: profile.initialLevel)
-
-        let fmt = DateFormatter()
-        fmt.dateFormat = "M/d"
-
-        return aggs.enumerated().map { i, agg in
-            let uvContrib   = max(0, totals[i] - oralOnly[i])
-            let oralContrib = max(0, oralOnly[i] - profile.initialLevel)
-            return DayModelResult(
-                date:        agg.date,
-                label:       fmt.string(from: agg.date),
-                total:       totals[i],
-                uvContrib:   uvContrib,
-                oralContrib: oralContrib)
-        }
-    }
-
-        private func write(csv: String, to url: URL) {
-        try? csv.write(to: url, atomically: true, encoding: .utf8)
     }
 
     // ── Persistence ──────────────────────────────────────────

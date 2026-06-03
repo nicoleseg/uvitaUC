@@ -25,14 +25,27 @@ struct InsightsView: View {
 
     var projWindowDays: [ProjDay] {
         let cal = Calendar.current
-        var dayMap: [Date: (uv: Double, oral: Double, bsa: Double)] = [:]
-        for r in store.readings {
+        var dayMap: [Date: (uv: Double, bsa: Double)] = [:]
+        for r in store.readings where r.label == nil {
             let day = cal.startOfDay(for: r.date)
             dayMap[day] = (uv: (dayMap[day]?.uv ?? 0) + r.sed,
-                           oral: r.oralUg, bsa: r.bsaPercent)
+                           bsa: r.bsaPercent)
         }
-        return Array(dayMap.values.sorted { _,_ in false }.prefix(projectionWindow))
-               .map { ProjDay(uvDose: $0.uv, oralDose: $0.oral, bsa: $0.bsa) }
+        // Resolve oral from food log (same logic as buildDayAggregates)
+        // so projection uses actual logged food, not stale snapshots
+        return Array(dayMap.keys.sorted().suffix(projectionWindow)).map { day in
+            let uvBsa = dayMap[day]!
+            let oral: Double
+            switch store.profile.oralSource {
+            case .manualLog:
+                oral = store.foodLog
+                    .filter { cal.isDate($0.date, inSameDayAs: day) }
+                    .reduce(0) { $0 + $1.vitaminDug }
+            default:
+                oral = store.profile.supplementOralUg
+            }
+            return ProjDay(uvDose: uvBsa.uv, oralDose: oral, bsa: uvBsa.bsa)
+        }
     }
 
     var actualWindowDays: Int { projWindowDays.count }
