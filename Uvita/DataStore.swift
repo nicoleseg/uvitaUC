@@ -725,28 +725,27 @@ class DataStore: ObservableObject {
     // Haversine distance in metres between two GPS coordinates.
     // Used to distinguish duplicate readings (same spot, < 30m)
     // from legitimate movement readings (moved 50m+).
-    func studyWindowAggregates() -> [DayAggregate] {
-
-    guard let startDate = profile.studyStartDate else {
-        return []
-    }
-
-    let cal = Calendar.current
-    let start = cal.startOfDay(for: startDate)
-
-    guard let end = cal.date(
-        byAdding: .day,
-        value: 6,
-        to: start
-    ) else {
-        return []
-    }
-
-    return buildDayAggregates()
-        .filter {
-            $0.date >= start &&
-            $0.date <= end
+    private func studyWindowAggregates() -> [DayAggregate] {
+        guard let startDate = profile.studyStartDate else {
+            return []
         }
+
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: startDate)
+
+        guard let end = cal.date(
+            byAdding: .day,
+            value: 6,
+            to: start
+        ) else {
+            return []
+        }
+
+        return buildDayAggregates()
+            .filter {
+                $0.date >= start &&
+                $0.date <= end
+            }
     }
     private func haversineDistance(lat1: Double, lon1: Double,
                                     lat2: Double, lon2: Double) -> Double {
