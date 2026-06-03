@@ -72,7 +72,7 @@ struct InsightsView: View {
     var projectedCorrected: [Double] {
         guard !projWindowDays.isEmpty else { return [] }
         let C0 = observedCorrected.last ?? store.profile.initialLevel
-        let n  = max(1, 90 - observedCorrected.count)
+        let n = max(1, 90 - projectionWindow)
         return VitaminDEngine.runModel(
             oralDoses: Array(repeating: windowAvgOral, count: n),
             uvDoses:   Array(repeating: windowAvgSED,  count: n),
@@ -94,10 +94,10 @@ struct InsightsView: View {
 
     // ── Milestones ────────────────────────────────────────────
     var daysToEscapeDeficiency: Int? {
-        projectedCorrected.firstIndex { $0 >= 30 }.map { $0 + 1 }
+        projectedCorrected.firstIndex { $0 >= 30 }.map { projectionWindow + $0 + 1 }
     }
     var daysToSufficiency: Int? {
-        projectedCorrected.firstIndex { $0 >= 50 }.map { $0 + 1 }
+        projectedCorrected.firstIndex { $0 >= 50 }.map { projectionWindow + $0 + 1 }
     }
     var projectionEndDate: Date {
         Calendar.current.date(byAdding: .day, value: 89, to: Date()) ?? Date()
