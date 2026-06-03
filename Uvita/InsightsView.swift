@@ -68,30 +68,45 @@ struct InsightsView: View {
         return projWindowDays.map { $0.oralDose }.reduce(0,+) / Double(projWindowDays.count)
     }
 
-    var projection90: [Double] {
+    // Observed days (corrected) — solid colored line
+    var observedCorrected: [Double] {
+        longitudinalData.map { $0.total }
+    }
+
+    // Observed days (raw auto) — dashed colored line
+    var observedRaw: [Double] {
+        store.rawLongitudinalModel(daysBack: daysToShow).map { $0.total }
+    }
+
+    // Projected days (corrected) continuing from last observed C_total
+    var projectedCorrected: [Double] {
         guard !projWindowDays.isEmpty else { return [] }
+        let C0 = observedCorrected.last ?? store.profile.initialLevel
+        let n  = max(1, 90 - observedCorrected.count)
         return VitaminDEngine.runModel(
-            oralDoses: Array(repeating: windowAvgOral, count: 90),
-            uvDoses:   Array(repeating: windowAvgSED,  count: 90),
-            bodyAreas: Array(repeating: windowAvgBSA,  count: 90),
+            oralDoses: Array(repeating: windowAvgOral, count: n),
+            uvDoses:   Array(repeating: windowAvgSED,  count: n),
+            bodyAreas: Array(repeating: windowAvgBSA,  count: n),
             age:       store.profile.age,
             skinType:  store.profile.skinType,
-            C0:        store.profile.initialLevel)
+            C0:        C0)
     }
 
-    // Raw auto projection — same window, but uses autoIndoors
-    // values instead of user-corrected values
-    var rawProjection90: [Double] {
-        store.rawAutoProjection(windowDays: projectionWindow)
+    // Projected days (raw) continuing from last observed raw C_total
+    var projectedRaw: [Double] {
+        guard !projWindowDays.isEmpty else { return [] }
+        let rawActuals = store.rawLongitudinalModel(daysBack: daysToShow)
+        let C0 = rawActuals.last?.total ?? store.profile.initialLevel
+        let n  = max(1, 90 - rawActuals.count)
+        return store.rawAutoProjection(windowDays: projectionWindow,
+                                       C0override: C0,
+                                       nDays: n)
     }
 
-    // Whether there's any meaningful difference between the two
     var projectionsHaveDiff: Bool {
-        guard projection90.count == rawProjection90.count,
-              !projection90.isEmpty else { return false }
-        let maxDiff = zip(projection90, rawProjection90)
+        let maxDiff = zip(projectedCorrected, projectedRaw)
             .map { abs($0 - $1) }.max() ?? 0
-        return maxDiff > 0.1  // more than 0.1 nmol/L difference
+        return maxDiff > 0.1
     }
 
     var projectionEndDate: Date {
@@ -232,43 +247,58 @@ struct InsightsView: View {
                                 }.padding(.horizontal)
 
                                 ProjectionChart(
-                                    data:      projection90,
-                                    rawData:   projectionsHaveDiff ? rawProjection90 : nil,
-                                    startDate: Date(),
-                                    endDate:   projectionEndDate)
-                                    .frame(height: 240).padding(.horizontal)
+                                    observed:          observedCorrected,
+                                    observedRaw:       observedRaw,
+                                    projected:         projectedCorrected,
+                                    projectedRaw:      projectionsHaveDiff ? projectedRaw : nil,
+                                    startDate:         longitudinalData.first?.date ?? Date(),
+                                    endDate:           projectionEndDate)
+                                    .frame(height: 260).padding(.horizontal)
 
-                                if projectionsHaveDiff {
-                                    HStack(spacing: 16) {
+                                // 4-line legend: observed/projected × corrected/raw
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 14) {
                                         HStack(spacing: 5) {
                                             Rectangle().fill(Color.teal)
-                                                .frame(width: 20, height: 3)
-                                            Text("With corrections")
+                                                .frame(width: 16, height: 2.5)
+                                            Text("Observed (corrected)")
                                                 .font(.caption2).foregroundColor(.secondary)
                                         }
                                         HStack(spacing: 5) {
-                                            Rectangle().fill(Color.gray.opacity(0.6))
-                                                .frame(width: 20, height: 3)
-                                                .overlay(
-                                                    GeometryReader { g in
-                                                        Path { p in
-                                                            stride(from: 0, to: g.size.width, by: 4).forEach { x in
-                                                                p.move(to: .init(x: x, y: g.size.height/2))
-                                                                p.addLine(to: .init(x: x+2, y: g.size.height/2))
-                                                            }
-                                                        }.stroke(Color.gray, lineWidth: 2)
-                                                    }
-                                                )
-                                            Text("Auto-detected only")
+                                            HStack(spacing: 2) {
+                                                ForEach(0..<3, id: \.self) { _ in
+                                                    Rectangle().fill(Color.teal)
+                                                        .frame(width: 4, height: 2.5)
+                                                }
+                                            }
+                                            Text("Projected (corrected)")
                                                 .font(.caption2).foregroundColor(.secondary)
                                         }
                                     }
-                                    .padding(.horizontal)
-                                } else if !projection90.isEmpty {
-                                    Text("No corrections made — lines are identical")
-                                        .font(.caption2).foregroundColor(.secondary)
-                                        .padding(.horizontal)
+                                    HStack(spacing: 14) {
+                                        HStack(spacing: 5) {
+                                            Rectangle().fill(Color.gray.opacity(0.5))
+                                                .frame(width: 16, height: 2)
+                                            Text("Observed (auto only)")
+                                                .font(.caption2).foregroundColor(.secondary)
+                                        }
+                                        HStack(spacing: 5) {
+                                            HStack(spacing: 2) {
+                                                ForEach(0..<3, id: \.self) { _ in
+                                                    Rectangle().fill(Color.gray.opacity(0.5))
+                                                        .frame(width: 4, height: 2)
+                                                }
+                                            }
+                                            Text("Projected (auto only)")
+                                                .font(.caption2).foregroundColor(.secondary)
+                                        }
+                                        if !projectionsHaveDiff {
+                                            Text("· lines identical")
+                                                .font(.caption2).foregroundColor(.secondary)
+                                        }
+                                    }
                                 }
+                                .padding(.horizontal)
 
                                 Text("14d window recommended — matches 25-day plasma half-life.")
                                     .font(.caption2).foregroundColor(.secondary)
@@ -383,88 +413,124 @@ struct LongitudinalLineChart: View {
 
 
 
-// ── Projection chart — segment-colored by value ───────────────
-// rawData is optional second line showing auto-detection only
+// ── Projection chart ─────────────────────────────────────────
+// Solid colored line = observed (corrected) + projected continuation
+// Dashed colored line = observed (raw auto) + projected continuation
+// The transition point is where observed ends and projected begins
 struct ProjectionChart: View {
-    let data:      [Double]
-    var rawData:   [Double]? = nil
-    let startDate: Date
-    let endDate:   Date
+    let observed:     [Double]        // real days — solid colored
+    var observedRaw:  [Double] = []   // real days — dashed colored
+    let projected:    [Double]        // future days — solid colored dashed
+    var projectedRaw: [Double]? = nil // future days raw — dashed gray
+    let startDate:    Date
+    let endDate:      Date
 
-    var allValues: [Double] { data + (rawData ?? []) }
-    var minVal: Double { 20.0 }
-    var maxVal: Double { max(60, allValues.max() ?? 60) }
-    var range:  Double { maxVal - minVal }
+    // Full combined arrays for scale calculation
+    var allData: [Double] { observed + projected }
+    var allRaw:  [Double] { observedRaw + (projectedRaw ?? projected) }
+    var minVal:  Double   { 20.0 }
+    var maxVal:  Double   { max(60, (allData + allRaw).max() ?? 60) }
+    var range:   Double   { maxVal - minVal }
+    var total:   Int      { observed.count + projected.count }
+
+    func yPos(_ v: Double, h: CGFloat) -> CGFloat {
+        h - h * CGFloat((v - minVal) / range)
+    }
+    func xPos(_ i: Int, w: CGFloat) -> CGFloat {
+        total > 1 ? w * CGFloat(i) / CGFloat(total - 1) : 0
+    }
+    func lineColor(_ v: Double) -> Color {
+        v < 30 ? .red : v < 50 ? .orange : .teal
+    }
 
     var endDateLabel: String {
         let fmt = DateFormatter(); fmt.dateFormat = "MMM d"
         return fmt.string(from: endDate)
     }
-    func lineColor(_ v: Double) -> Color {
-        v < 30 ? .red : v < 50 ? .orange : .green
-    }
 
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width
-            let h = geo.size.height - 28
-            let n = data.count
+            let h = geo.size.height - 32
             ZStack(alignment: .bottomLeading) {
-                let y30 = h - h * CGFloat((30 - minVal) / range)
-                let y50 = h - h * CGFloat((50 - minVal) / range)
 
+                // Threshold bands
+                let y30 = yPos(30, h: h)
+                let y50 = yPos(50, h: h)
                 Rectangle().fill(Color.red.opacity(0.06))
                     .frame(width: w, height: h - y30).offset(y: y30)
                 Rectangle().fill(Color.green.opacity(0.06))
                     .frame(width: w, height: y50)
-                Rectangle().fill(Color.green.opacity(0.4))
-                    .frame(height: 1).offset(y: y50)
-                Text("50 sufficient").font(.system(size: 8)).foregroundColor(.green)
-                    .offset(x: 2, y: y50 - 10)
-                Rectangle().fill(Color.red.opacity(0.4))
-                    .frame(height: 1).offset(y: y30)
-                Text("30 deficient").font(.system(size: 8)).foregroundColor(.red)
-                    .offset(x: 2, y: y30 - 10)
+                Rectangle().fill(Color.green.opacity(0.35)).frame(height: 1).offset(y: y50)
+                Text("50").font(.system(size: 7)).foregroundColor(.green)
+                    .offset(x: 2, y: y50 - 8)
+                Rectangle().fill(Color.red.opacity(0.35)).frame(height: 1).offset(y: y30)
+                Text("30").font(.system(size: 7)).foregroundColor(.red)
+                    .offset(x: 2, y: y30 - 8)
 
-                // Raw auto line — dashed gray, drawn first (behind)
-                if let raw = rawData, raw.count >= 2 {
+                // Vertical divider at observed/projected boundary
+                if observed.count > 0 && projected.count > 0 {
+                    let divX = xPos(observed.count - 1, w: w)
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(width: 1, height: h)
+                        .offset(x: divX)
+                    Text("today").font(.system(size: 7))
+                        .foregroundColor(.secondary)
+                        .offset(x: divX - 10, y: h + 18)
+                }
+
+                // ── Raw lines (behind) ──────────────────────
+                // Observed raw — dashed colored
+                let rawFull = observedRaw.isEmpty
+                    ? observed
+                    : observedRaw + (projectedRaw ?? projected)
+                if rawFull.count >= 2 {
                     Path { p in
-                        for i in 0..<raw.count {
-                            let x = w * CGFloat(i) / CGFloat(raw.count - 1)
-                            let y = h - h * CGFloat((raw[i] - minVal) / range)
+                        for i in 0..<rawFull.count {
+                            let x = xPos(i, w: w)
+                            let y = yPos(rawFull[i], h: h)
                             i == 0 ? p.move(to: .init(x: x, y: y))
                                    : p.addLine(to: .init(x: x, y: y))
                         }
                     }
-                    .stroke(Color.gray.opacity(0.5),
-                            style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                    .stroke(Color.gray.opacity(0.45),
+                            style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
                 }
 
-                // Corrected line — colored by plasma value, drawn on top
-                if n >= 2 {
-                    ForEach(0..<(n-1), id: \.self) { i in
-                        let x1 = w * CGFloat(i)   / CGFloat(n-1)
-                        let x2 = w * CGFloat(i+1) / CGFloat(n-1)
-                        let y1 = h - h * CGFloat((data[i]   - minVal) / range)
-                        let y2 = h - h * CGFloat((data[i+1] - minVal) / range)
-                        Path { p in
-                            p.move(to: .init(x: x1, y: y1))
-                            p.addLine(to: .init(x: x2, y: y2))
-                        }.stroke(lineColor(data[i]), lineWidth: 2.5)
+                // ── Corrected lines (front) ─────────────────
+                // Observed — solid, colored by value
+                let corrFull = observed + projected
+                ForEach(0..<max(0, corrFull.count - 1), id: \.self) { i in
+                    let isProjected = i >= observed.count - 1
+                    let x1 = xPos(i, w: w)
+                    let x2 = xPos(i + 1, w: w)
+                    let y1 = yPos(corrFull[i],   h: h)
+                    let y2 = yPos(corrFull[i+1], h: h)
+                    Path { p in
+                        p.move(to:    .init(x: x1, y: y1))
+                        p.addLine(to: .init(x: x2, y: y2))
                     }
+                    .stroke(lineColor(corrFull[i]),
+                            style: StrokeStyle(
+                                lineWidth: isProjected ? 1.8 : 2.5,
+                                dash: isProjected ? [5, 3] : []))
                 }
 
-                ForEach([0,14,29,44,59,74,89], id: \.self) { i in
-                    if i < n {
-                        let x = w * CGFloat(i) / CGFloat(n-1)
-                        Text("D\(i+1)").font(.system(size: 8))
-                            .foregroundColor(.secondary)
-                            .position(x: x, y: h + 10)
-                    }
+                // Day labels along bottom
+                let labelStep = total > 30 ? 14 : 7
+                ForEach(Array(stride(from: 0, to: total, by: labelStep)),
+                        id: \.self) { i in
+                    Text("D\(i+1)")
+                        .font(.system(size: 7))
+                        .foregroundColor(.secondary)
+                        .position(x: xPos(i, w: w), y: h + 10)
                 }
-                Text(endDateLabel).font(.system(size: 9, weight: .semibold))
+                // End date label
+                Text(endDateLabel)
+                    .font(.system(size: 8, weight: .semibold))
                     .foregroundColor(.secondary)
-                    .position(x: w - 20, y: h + 22)
+                    .position(x: w - 22, y: h + 22)
             }
         }
     }

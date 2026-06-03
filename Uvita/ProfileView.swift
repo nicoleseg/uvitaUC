@@ -188,6 +188,12 @@ struct ProfileView: View {
                 }
 
                 Section("Data") {
+                    Button("Export projections to CSV") {
+                        store.exportProjectionCSVs()
+                    }.foregroundColor(.teal)
+                    Text("Uses 7-day window from study start date. Writes observed_actuals.csv, projection_corrected.csv, projection_raw_auto.csv to Files → Uvita.")
+                        .font(.caption2).foregroundColor(.secondary)
+
                     Button("Recover readings + food log from CSV") {
                         store.recoverReadingsFromCSV()
                     }.foregroundColor(.blue)
