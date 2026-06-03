@@ -249,17 +249,25 @@ class DataStore: ObservableObject {
         return result.last ?? profile.initialLevel
     }
 
-    func plasmaHistory(days: Int) -> [(Date, Double)] {
-        let cal   = Calendar.current
-        let today = cal.startOfDay(for: Date())
+    func plasmaHistory(days: Int = 7) -> [(Date, Double)] {
+        guard let startDate = profile.studyStartDate else {
+            return []
+        }
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: startDate)
+
         return (0..<days).compactMap { offset -> (Date, Double)? in
+
             guard let date = cal.date(
-                byAdding: .day, value: -offset, to: today)
-            else { return nil }
+                byAdding: .day,
+                value: offset,
+                to: start
+            ) else {
+                return nil
+            }
             let level = plasmaForDay(date)
-            guard level > 0 else { return nil }
             return (date, level)
-        }.reversed()
+        }
     }
 
     // Same as buildDayAggregates but uses autoIndoorsResolved
@@ -416,14 +424,26 @@ class DataStore: ObservableObject {
     }
 
     func longitudinalModel(daysBack: Int) -> [DayModelResult] {
-        let cal   = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        guard let cutoff = cal.date(
-            byAdding: .day, value: -(daysBack - 1), to: today)
-        else { return [] }
+        guard let startDate = profile.studyStartDate else {
+            return []
+        }
+
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: startDate)
+
+        guard let end = cal.date(
+            byAdding: .day,
+            value: daysBack - 1,
+            to: start
+        ) else {
+            return []
+        }
 
         let aggs = buildDayAggregates()
-            .filter { $0.date >= cutoff }
+            .filter {
+                $0.date >= start &&
+                $0.date <= end
+            }
         guard !aggs.isEmpty else { return [] }
 
         let n = aggs.count
@@ -469,19 +489,26 @@ class DataStore: ObservableObject {
 
     func rawLongitudinalModel(daysBack: Int) -> [DayModelResult] {
 
-    let cal = Calendar.current
-    let today = cal.startOfDay(for: Date())
+        guard let startDate = profile.studyStartDate else {
+            return []
+        }
 
-    guard let cutoff = cal.date(
-        byAdding: .day,
-        value: -(daysBack - 1),
-        to: today
-    ) else {
-        return []
-    }
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: startDate)
 
-    let aggs = buildRawDayAggregates()
-        .filter { $0.date >= cutoff }
+        guard let end = cal.date(
+            byAdding: .day,
+            value: daysBack - 1,
+            to: start
+        ) else {
+            return []
+        }
+
+        let aggs = buildRawDayAggregates()
+            .filter {
+                $0.date >= start &&
+                $0.date <= end
+            }
 
     guard !aggs.isEmpty else {
         return []
@@ -698,6 +725,29 @@ class DataStore: ObservableObject {
     // Haversine distance in metres between two GPS coordinates.
     // Used to distinguish duplicate readings (same spot, < 30m)
     // from legitimate movement readings (moved 50m+).
+    func studyWindowAggregates() -> [DayAggregate] {
+
+    guard let startDate = profile.studyStartDate else {
+        return []
+    }
+
+    let cal = Calendar.current
+    let start = cal.startOfDay(for: startDate)
+
+    guard let end = cal.date(
+        byAdding: .day,
+        value: 6,
+        to: start
+    ) else {
+        return []
+    }
+
+    return buildDayAggregates()
+        .filter {
+            $0.date >= start &&
+            $0.date <= end
+        }
+    }
     private func haversineDistance(lat1: Double, lon1: Double,
                                     lat2: Double, lon2: Double) -> Double {
         let R   = 6371000.0  // Earth radius in metres
