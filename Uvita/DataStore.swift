@@ -716,11 +716,6 @@ class DataStore: ObservableObject {
     // times — skips dates already present in readings[].
     func recoverReadingsFromCSV() {
         // Only recover if readings are empty — prevents doubling on every launch
-        guard readings.isEmpty else {
-            print("Recovery: readings already populated (\(readings.count)) — skipping UV recovery")
-            recoverFoodLogFromCSV()  // still check food log separately
-            return
-        }
         guard let dir = FileManager.default.urls(
             for: .documentDirectory,
             in: .userDomainMask).first else { return }
@@ -736,14 +731,14 @@ class DataStore: ObservableObject {
             return
         }
 
-        let cal = Calendar.current
-        // Dates already in readings — skip these
-        let existingDates = Set(readings.map {
-            cal.startOfDay(for: $0.date)
-        })
 
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
+        var existingTS = Set(
+            readings.map {
+                iso.string(from: $0.date)
+            }
+        )
         var recovered = 0
 
         for file in files {
@@ -758,8 +753,9 @@ class DataStore: ObservableObject {
                 let tsStr = cols[0].trimmingCharacters(in: .whitespaces)
                 guard let date = iso.date(from: tsStr) else { continue }
 
-                let day = cal.startOfDay(for: date)
-                if existingDates.contains(day) { continue }
+                if existingTS.contains(tsStr) {
+                    continue
+                }
 
                 let col2val = Double(cols[2]) ?? 0
                 let isNewFormat = cols.count >= 17 &&
@@ -830,6 +826,7 @@ class DataStore: ObservableObject {
                     autoIndoors:   nil)
 
                 readings.append(reading)
+                existingTS.insert(tsStr)
                 recovered += 1
             }
         }
@@ -869,7 +866,6 @@ class DataStore: ObservableObject {
         fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.timeZone = TimeZone(secondsFromGMT: 0)
 
-        // If food log already has entries, skip recovery entirely
         var existingTS: Set<String> =
             Set(foodLog.map {
                 fmt.string(from: $0.date)
