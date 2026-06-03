@@ -202,10 +202,10 @@ struct DayHistoryRow: View {
                             }
                         }
                         Spacer()
-                        Text(String(format: "%.1f nmol/L", day.total))
+                        Text(String(format: "%.1f nmol/L", displayedPlasma))
                             .font(.caption)
                             .fontWeight(.semibold)
-                            .foregroundColor(levelColor(day.total))
+                            .foregroundColor(levelColor(displayedPlasma))
                     }
                     .padding(.horizontal).padding(.vertical, 8)
                     Divider().padding(.horizontal)
@@ -233,6 +233,25 @@ struct DayHistoryRow: View {
 
     func levelColor(_ v: Double) -> Color {
         v < 30 ? .red : v < 50 ? .orange : .green
+    }
+    var displayedPlasma: Double {
+        let history =
+            store.longitudinalModel(daysBack: 365)
+
+        guard let idx =
+            history.firstIndex(where: {
+                Calendar.current.isDate(
+                    $0.date,
+                    inSameDayAs: day.date
+                )
+            })
+        else {
+            return store.profile.initialLevel
+        }
+
+        return idx == 0
+            ? store.profile.initialLevel
+            : history[idx - 1].total
     }
 }
 

@@ -173,13 +173,26 @@ class DataStore: ObservableObject {
 
                 var uvDose = 0.0
 
+                guard !sortedReadings.isEmpty else {
+                    return DayAggregate(
+                        date: day,
+                        uvDose: 0,
+                        oralDose: 0,
+                        bsa: profile.clothing.bsaPercent
+                    )
+                }
+
+                // Normal backward-looking intervals
                 for i in 1..<sortedReadings.count {
 
                     let prev = sortedReadings[i - 1]
                     let curr = sortedReadings[i]
 
                     let intervalHours =
-                        curr.date.timeIntervalSince(prev.date) / 3600.0
+                        effectiveUVHours(
+                            from: prev.date,
+                            to: curr.date
+                        )
 
                     let effectiveUVI =
                         prev.indoors ? 0.0 : prev.uvi
@@ -188,6 +201,37 @@ class DataStore: ObservableObject {
                         uvi: effectiveUVI,
                         intervalHours: intervalHours
                     )
+                }
+
+                // Extend final reading to 8 PM
+                if let last = sortedReadings.last {
+
+                    let cal = Calendar.current
+
+                    let sunsetBoundary =
+                        cal.date(
+                            bySettingHour: 20,
+                            minute: 0,
+                            second: 0,
+                            of: last.date
+                        )!
+
+                    if last.date < sunsetBoundary {
+
+                        let intervalHours =
+                            effectiveUVHours(
+                                from: last.date,
+                                to: sunsetBoundary
+                            )
+
+                        let effectiveUVI =
+                            last.indoors ? 0.0 : last.uvi
+
+                        uvDose += VitaminDEngine.uviToSED(
+                            uvi: effectiveUVI,
+                            intervalHours: intervalHours
+                        )
+                    }
                 }
                 // Oral dose — resolved from active source for that day:
                 // If manualLog: sum food log entries for that calendar day
@@ -341,18 +385,48 @@ class DataStore: ObservableObject {
                     let curr = sortedReadings[i]
 
                     let intervalHours =
-                        curr.date.timeIntervalSince(prev.date) / 3600.0
+                        effectiveUVHours(
+                            from: prev.date,
+                            to: curr.date
+                        )
 
-                    let rawIndoor =
-                        prev.autoIndoorsResolved
+                    //let rawIndoor =
+                    //    prev.autoIndoorsResolved
 
                     let effectiveUVI =
-                        rawIndoor ? 0.0 : prev.uvi
+                        prev.autoIndoorsResolved ? 0.0 : prev.uvi
 
                     uvDose += VitaminDEngine.uviToSED(
                         uvi: effectiveUVI,
                         intervalHours: intervalHours
                     )
+                }
+                if let last = sortedReadings.last {
+
+                    let sunsetBoundary =
+                        Calendar.current.date(
+                            bySettingHour: 20,
+                            minute: 0,
+                            second: 0,
+                            of: last.date
+                        )!
+
+                    if last.date < sunsetBoundary {
+
+                        let intervalHours =
+                            effectiveUVHours(
+                                from: last.date,
+                                to: sunsetBoundary
+                            )
+
+                        let effectiveUVI =
+                            last.autoIndoorsResolved ? 0.0 : last.uvi
+
+                        uvDose += VitaminDEngine.uviToSED(
+                            uvi: effectiveUVI,
+                            intervalHours: intervalHours
+                        )
+                    }
                 }
                 let oral = rds.sorted { $0.date < $1.date }
                                .last?.oralUg ?? profile.supplementOralUg
@@ -361,6 +435,37 @@ class DataStore: ObservableObject {
                 return DayAggregate(date: day, uvDose: uvDose,
                                     oralDose: oral, bsa: bsa)
             }
+    }
+
+    private func effectiveUVHours(
+        from start: Date,
+        to end: Date
+    ) -> Double {
+
+        let cal = Calendar.current
+
+        var total: Double = 0
+        var cursor = start
+
+        while cursor < end {
+
+            let nextHour =
+                cal.date(byAdding: .hour, value: 1, to: cursor)!
+            let segmentEnd = min(nextHour, end)
+
+            let hour =
+                cal.component(.hour, from: cursor)
+
+            if hour >= 6 && hour < 20 {
+                total +=
+                    segmentEnd.timeIntervalSince(cursor)
+                    / 3600.0
+            }
+
+            cursor = segmentEnd
+        }
+
+        return total
     }
 
     // Raw auto projection — what the model would show
@@ -435,19 +540,47 @@ class DataStore: ObservableObject {
     }
 
     func rawAutoProjection(windowDays: Int) -> [Double] {
-        let aggs = buildRawDayAggregates()
-        let window = Array(aggs.suffix(windowDays))
-        guard !window.isEmpty else { return [] }
-        let avgSED  = window.map { $0.uvDose  }.reduce(0,+) / Double(window.count)
-        let avgOral = window.map { $0.oralDose }.reduce(0,+) / Double(window.count)
-        let avgBSA  = window.map { $0.bsa      }.reduce(0,+) / Double(window.count)
-        return VitaminDEngine.runModel(
-            oralDoses: Array(repeating: avgOral, count: 90),
-            uvDoses:   Array(repeating: avgSED,  count: 90),
-            bodyAreas: Array(repeating: avgBSA,  count: 90),
-            age:       profile.age,
-            skinType:  profile.skinType,
-            C0:        profile.initialLevel)
+
+            let aggs = buildRawDayAggregates()
+            let window = Array(aggs.suffix(windowDays))
+
+            guard !window.isEmpty else {
+                return []
+            }
+
+            let avgSED =
+                window.map { $0.uvDose }
+                    .reduce(0,+)
+                / Double(window.count)
+
+            let avgOral =
+                window.map { $0.oralDose }
+                    .reduce(0,+)
+                / Double(window.count)
+
+            let avgBSA =
+                window.map { $0.bsa }
+                    .reduce(0,+)
+                / Double(window.count)
+
+            let futureDays =
+                max(0, 90 - windowDays)
+
+            let observedRaw =
+                rawLongitudinalModel(daysBack: windowDays)
+
+            let rawC0 =
+                observedRaw.last?.total
+                ?? profile.initialLevel
+
+            return VitaminDEngine.runModel(
+                oralDoses: Array(repeating: avgOral, count: futureDays),
+                uvDoses:   Array(repeating: avgSED,  count: futureDays),
+                bodyAreas: Array(repeating: avgBSA,  count: futureDays),
+                age:       profile.age,
+                skinType:  profile.skinType,
+                C0:        rawC0
+            )
     }
 
     // For InsightsView longitudinal chart — returns per-day
@@ -673,29 +806,39 @@ class DataStore: ObservableObject {
 
     do {
 
-        let projectionWindow = 14
+        let projectionWindow = 7
+        let futureDays = max(0, 90 - projectionWindow)
 
-        let aggs = longitudinalModel(daysBack: projectionWindow)
+        let recentAggs =
+            Array(buildDayAggregates().suffix(projectionWindow))
+
+        let observed =
+            longitudinalModel(daysBack: projectionWindow)
 
         let c0 =
-            aggs.last?.total ??
-            profile.initialLevel
+            observed.last?.total
+            ?? profile.initialLevel
+
+        let avgSED =
+            recentAggs.map { $0.uvDose }
+                .reduce(0,+)
+            / Double(max(1, recentAggs.count))
+
+        let avgOral =
+            recentAggs.map { $0.oralDose }
+                .reduce(0,+)
+            / Double(max(1, recentAggs.count))
+
+        let avgBSA =
+            recentAggs.map { $0.bsa }
+                .reduce(0,+)
+            / Double(max(1, recentAggs.count))
 
         let corrected =
             VitaminDEngine.runModel(
-                oralDoses: Array(repeating: dailyOralUg(),
-                                 count: 90),
-                uvDoses: Array(
-                    repeating:
-                        aggs.map{$0.uvContrib}
-                            .reduce(0,+)
-                        / max(1, Double(aggs.count)),
-                    count: 90
-                ),
-                bodyAreas: Array(
-                    repeating: profile.clothing.bsaPercent,
-                    count: 90
-                ),
+                oralDoses: Array(repeating: avgOral, count: futureDays),
+                uvDoses: Array(repeating: avgSED, count: futureDays),
+                bodyAreas: Array(repeating: avgBSA, count: futureDays),
                 age: profile.age,
                 skinType: profile.skinType,
                 C0: c0
@@ -729,7 +872,7 @@ class DataStore: ObservableObject {
 
         let raw =
             rawAutoProjection(
-                windowDays: 14
+                windowDays: 7
             )
 
         let file =
@@ -740,8 +883,10 @@ class DataStore: ObservableObject {
         var csv =
             "day,plasma_nmol_l\n"
 
+        let projectionWindow = 7
+
         for (idx,val) in raw.enumerated() {
-            csv += "\(idx+1),\(val)\n"
+            csv += "\(projectionWindow + idx + 1),\(val)\n"
         }
 
         try csv.write(
