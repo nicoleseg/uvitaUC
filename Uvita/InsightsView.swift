@@ -188,6 +188,7 @@ struct InsightsView: View {
                             Text("90-Day Projection")
                                 .font(.headline).padding(.horizontal)
 
+                            let windowLabel = "(\(actualWindowDays) days data)"
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("Average over most recent:")
                                     .font(.caption).foregroundColor(.secondary)
@@ -199,7 +200,7 @@ struct InsightsView: View {
                                         ) { projectionWindow = days }
                                     }
                                     Spacer()
-                                    Text("(\(actualWindowDays) days data)")
+                                    Text(windowLabel)
                                         .font(.caption2).foregroundColor(.secondary)
                                 }
                             }.padding(.horizontal)
