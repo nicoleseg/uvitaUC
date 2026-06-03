@@ -80,12 +80,11 @@ struct InsightsView: View {
             age: store.profile.age, skinType: store.profile.skinType, C0: C0)
     }
     var projectedRaw: [Double] {
-        guard !projWindowDays.isEmpty else { return [] }
-        let rawActuals = store.rawLongitudinalModel(daysBack: daysToShow)
-        let C0 = rawActuals.last?.total ?? store.profile.initialLevel
-        let n  = max(1, 90 - rawActuals.count)
-        return store.rawAutoProjection(windowDays: projectionWindow,
-                                       C0override: C0, nDays: n)
+    guard !projWindowDays.isEmpty else { return [] }
+
+    return store.rawAutoProjection(
+        windowDays: projectionWindow
+    )
     }
     var projectionsHaveDiff: Bool {
         let maxDiff = zip(projectedCorrected, projectedRaw)

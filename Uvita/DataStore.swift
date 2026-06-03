@@ -463,7 +463,66 @@ class DataStore: ObservableObject {
                 oralContrib: oralContrib)
         }
     }
+    func rawLongitudinalModel(daysBack: Int) -> [DayModelResult] {
 
+    let cal = Calendar.current
+    let today = cal.startOfDay(for: Date())
+
+    guard let cutoff = cal.date(
+        byAdding: .day,
+        value: -(daysBack - 1),
+        to: today
+    ) else {
+        return []
+    }
+
+    let aggs = buildRawDayAggregates()
+        .filter { $0.date >= cutoff }
+
+    guard !aggs.isEmpty else {
+        return []
+    }
+
+    let totals = VitaminDEngine.runModel(
+        oralDoses: aggs.map { $0.oralDose },
+        uvDoses: aggs.map { $0.uvDose },
+        bodyAreas: aggs.map { $0.bsa },
+        age: profile.age,
+        skinType: profile.skinType,
+        C0: profile.initialLevel
+    )
+
+    let uvOnly = VitaminDEngine.runModel(
+        oralDoses: Array(repeating: 0, count: aggs.count),
+        uvDoses: aggs.map { $0.uvDose },
+        bodyAreas: aggs.map { $0.bsa },
+        age: profile.age,
+        skinType: profile.skinType,
+        C0: profile.initialLevel
+    )
+
+    let oralOnly = VitaminDEngine.runModel(
+        oralDoses: aggs.map { $0.oralDose },
+        uvDoses: Array(repeating: 0, count: aggs.count),
+        bodyAreas: aggs.map { $0.bsa },
+        age: profile.age,
+        skinType: profile.skinType,
+        C0: profile.initialLevel
+    )
+
+    let fmt = DateFormatter()
+    fmt.dateFormat = "M/d"
+
+    return aggs.enumerated().map { i, agg in
+        DayModelResult(
+            date: agg.date,
+            label: fmt.string(from: agg.date),
+            total: totals[i],
+            uvContrib: max(0, totals[i] - oralOnly[i]),
+            oralContrib: max(0, oralOnly[i] - profile.initialLevel)
+        )
+    }
+    }
     // ── Helpers ──────────────────────────────────────────────────
 
     // Haversine distance in metres between two GPS coordinates.
