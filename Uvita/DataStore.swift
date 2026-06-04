@@ -630,17 +630,12 @@ class DataStore: ObservableObject {
             let futureDays =
                 max(0, 90 - windowDays)
 
-            // C0 = plasma at end of study window (stable between exports)
-            let rawWindowPlasma = window.isEmpty
-                ? [profile.initialLevel]
-                : VitaminDEngine.runModel(
-                    oralDoses: window.map { $0.oralDose },
-                    uvDoses:   window.map { $0.uvDose },
-                    bodyAreas: window.map { $0.bsa },
-                    age: profile.age,
-                    skinType: profile.skinType,
-                    C0: profile.initialLevel)
-            let rawC0 = rawWindowPlasma.last ?? profile.initialLevel
+            let observedRaw =
+                rawLongitudinalModel(daysBack: windowDays)
+
+            let rawC0 =
+                observedRaw.last?.total
+                ?? profile.initialLevel
 
             return VitaminDEngine.runModel(
                 oralDoses: Array(repeating: avgOral, count: futureDays),
@@ -932,23 +927,12 @@ class DataStore: ObservableObject {
         let recentAggs =
             studyWindowAggregates(days: projectionWindow)
 
-        // C0 = plasma at end of the study window (days 1-7 from study start)
-        // Using the study window itself as C0 source keeps the projection
-        // stable between exports regardless of food logged after day 7
-        let windowAggs = recentAggs
-        let windowOralDoses = windowAggs.map { $0.oralDose }
-        let windowUVDoses   = windowAggs.map { $0.uvDose }
-        let windowBSAs      = windowAggs.map { $0.bsa }
-        let windowPlasma    = windowAggs.isEmpty
-            ? [profile.initialLevel]
-            : VitaminDEngine.runModel(
-                oralDoses: windowOralDoses,
-                uvDoses:   windowUVDoses,
-                bodyAreas: windowBSAs,
-                age: profile.age,
-                skinType: profile.skinType,
-                C0: profile.initialLevel)
-        let c0 = windowPlasma.last ?? profile.initialLevel
+        let observed =
+            longitudinalModel(daysBack: projectionWindow)
+
+        let c0 =
+            observed.last?.total
+            ?? profile.initialLevel
 
         let avgSED =
             recentAggs.map { $0.uvDose }
@@ -1103,8 +1087,6 @@ class DataStore: ObservableObject {
         let dayCount: Int
     }
 
-
-    
     func projectionWindowStats(days: Int) -> ProjectionWindowStats {
 
         let aggs = studyWindowAggregates(days: days)
@@ -1134,8 +1116,84 @@ class DataStore: ObservableObject {
             dayCount: aggs.count
         )
     }
-
     
+    func rawStudyWindowAggregates(days: Int) -> [DayAggregate] {
+
+        guard let startDate = profile.studyStartDate else {
+            return []
+        }
+
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: startDate)
+
+        let existingAggs = buildRawDayAggregates()
+
+        var result: [DayAggregate] = []
+
+        for offset in 0..<days {
+
+            guard let date =
+                cal.date(
+                    byAdding: .day,
+                    value: offset,
+                    to: start
+                )
+            else { continue }
+
+            if let existing =
+                existingAggs.first(where: {
+                    cal.isDate($0.date, inSameDayAs: date)
+                }) {
+
+                result.append(existing)
+
+            } else {
+                let oral: Double
+                switch profile.oralSource {
+                case .manualLog:
+                    oral = foodLog
+                        .filter {
+                            cal.isDate($0.date, inSameDayAs: date)
+                        }
+                        .reduce(0) {
+                            $0 + $1.vitaminDug
+                        }
+
+                default:
+
+                    oral = profile.supplementOralUg
+                }
+
+                result.append(
+                    DayAggregate(
+                        date: date,
+                        uvDose: 0,
+                        oralDose: oral,
+                        bsa: profile.clothing.bsaPercent
+                    )
+                )
+            }
+        }
+
+        return result
+    }
+
+    private func haversineDistance(lat1: Double, lon1: Double,
+                                    lat2: Double, lon2: Double) -> Double {
+        let R   = 6371000.0  // Earth radius in metres
+        let φ1  = lat1 * .pi / 180
+        let φ2  = lat2 * .pi / 180
+        let Δφ  = (lat2 - lat1) * .pi / 180
+        let Δλ  = (lon2 - lon1) * .pi / 180
+        let a   = sin(Δφ/2) * sin(Δφ/2)
+                + cos(φ1) * cos(φ2) * sin(Δλ/2) * sin(Δλ/2)
+        return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+    }
+
+    // ── CSV recovery ─────────────────────────────────────────
+    // Reads UVlogs CSV files back into readings[] if UserDefaults
+    // was wiped due to model incompatibility. Safe to call multiple
+    // times — skips dates already present in readings[].
     func recoverReadingsFromCSV() {
         // Only recover if readings are empty — prevents doubling on every launch
         guard let dir = FileManager.default.urls(

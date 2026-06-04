@@ -24,29 +24,19 @@ struct InsightsView: View {
     struct ProjDay { let uvDose, oralDose, bsa: Double }
 
     var projWindowDays: [ProjDay] {
-        let cal = Calendar.current
-        var dayMap: [Date: (uv: Double, bsa: Double)] = [:]
-        for r in store.readings where r.label == nil {
-            let day = cal.startOfDay(for: r.date)
-            dayMap[day] = (uv: (dayMap[day]?.uv ?? 0) + r.sed,
-                           bsa: r.bsaPercent)
-        }
-        // Resolve oral from food log (same logic as buildDayAggregates)
-        // so projection uses actual logged food, not stale snapshots
-        return Array(dayMap.keys.sorted().suffix(projectionWindow)).map { day in
-            let uvBsa = dayMap[day]!
-            let oral: Double
-            switch store.profile.oralSource {
-            case .manualLog:
-                oral = store.foodLog
-                    .filter { cal.isDate($0.date, inSameDayAs: day) }
-                    .reduce(0) { $0 + $1.vitaminDug }
-            default:
-                oral = store.profile.supplementOralUg
-            }
-            return ProjDay(uvDose: uvBsa.uv, oralDose: oral, bsa: uvBsa.bsa)
-        }
+
+    let aggs = store.studyWindowAggregates(
+        days: projectionWindow
+    )
+
+    return aggs.map {
+        ProjDay(
+            uvDose: $0.uvDose,
+            oralDose: $0.oralDose,
+            bsa: $0.bsa
+        )
     }
+}
 
     var actualWindowDays: Int { projWindowDays.count }
     var windowAvgSED:  Double {
@@ -71,7 +61,19 @@ struct InsightsView: View {
     // ── Projected series ──────────────────────────────────────
     var projectedCorrected: [Double] {
         guard !projWindowDays.isEmpty else { return [] }
-        let C0 = observedCorrected.last ?? store.profile.initialLevel
+        let windowAggs =
+            store.studyWindowAggregates(
+                days: projectionWindow
+            )
+
+        let observed =
+            store.longitudinalModel(
+                daysBack: projectionWindow
+            )
+
+        let C0 =
+            observed.last?.total
+            ?? store.profile.initialLevel
         let n  = max(1, 90 - observedCorrected.count)
         return VitaminDEngine.runModel(
             oralDoses: Array(repeating: windowAvgOral, count: n),
@@ -81,11 +83,10 @@ struct InsightsView: View {
     }
     var projectedRaw: [Double] {
         guard !projWindowDays.isEmpty else { return [] }
-        let rawActuals = store.rawLongitudinalModel(daysBack: daysToShow)
-        let C0 = rawActuals.last?.total ?? store.profile.initialLevel
-        let n  = max(1, 90 - rawActuals.count)
-        return store.rawAutoProjection(windowDays: projectionWindow,
-                                       C0override: C0, nDays: n)
+
+        return store.rawAutoProjection(
+            windowDays: projectionWindow
+        )
     }
     var projectionsHaveDiff: Bool {
         let maxDiff = zip(projectedCorrected, projectedRaw)
@@ -94,11 +95,18 @@ struct InsightsView: View {
     }
 
     // ── Milestones ────────────────────────────────────────────
-    var daysToEscapeDeficiency: Int? {
-        projectedCorrected.firstIndex { $0 >= 30 }.map { $0 + 1 }
+    var fullCorrected: [Double] {
+        observedCorrected + projectedCorrected
     }
+
+    var daysToEscapeDeficiency: Int? {
+        fullCorrected.firstIndex { $0 >= 30 }
+            .map { $0 + 1 }
+    }
+
     var daysToSufficiency: Int? {
-        projectedCorrected.firstIndex { $0 >= 50 }.map { $0 + 1 }
+        fullCorrected.firstIndex { $0 >= 50 }
+            .map { $0 + 1 }
     }
     var projectionEndDate: Date {
         Calendar.current.date(byAdding: .day, value: 89, to: Date()) ?? Date()
