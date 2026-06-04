@@ -58,9 +58,10 @@ struct HistoryView: View {
                         }
                         .padding(.horizontal)
 
-                        let totalSED = store.readings
-                            .filter { $0.label == nil }
-                            .reduce(0) { $0 + $1.sed }
+                        let totalSED = store
+                            .studyWindowAggregates(days: daysToShow)
+                            .map { $0.uvDose }
+                            .reduce(0,+)
                         SummaryCard(
                             label: "Total UV dose",
                             value: String(format: "%.4f", totalSED),
