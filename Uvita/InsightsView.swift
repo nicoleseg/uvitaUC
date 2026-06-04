@@ -4,7 +4,7 @@ import SwiftUI
 struct InsightsView: View {
     @EnvironmentObject var store: DataStore
     @State var selectedRange     = 0
-    @State var projectionWindow: Int = 7
+    @State var projectionWindow: Int = 14
     let ranges = ["7 days", "14 days", "30 days"]
 
     var daysToShow: Int {
@@ -24,18 +24,27 @@ struct InsightsView: View {
     struct ProjDay { let uvDose, oralDose, bsa: Double }
 
     var projWindowDays: [ProjDay] {
-
-        let aggs =
-            store.studyWindowAggregates(
-                days: projectionWindow
-            )
-
-        return aggs.map {
-            ProjDay(
-                uvDose: $0.uvDose,
-                oralDose: $0.oralDose,
-                bsa: $0.bsa
-            )
+        let cal = Calendar.current
+        var dayMap: [Date: (uv: Double, bsa: Double)] = [:]
+        for r in store.readings where r.label == nil {
+            let day = cal.startOfDay(for: r.date)
+            dayMap[day] = (uv: (dayMap[day]?.uv ?? 0) + r.sed,
+                           bsa: r.bsaPercent)
+        }
+        // Resolve oral from food log (same logic as buildDayAggregates)
+        // so projection uses actual logged food, not stale snapshots
+        return Array(dayMap.keys.sorted().suffix(projectionWindow)).map { day in
+            let uvBsa = dayMap[day]!
+            let oral: Double
+            switch store.profile.oralSource {
+            case .manualLog:
+                oral = store.foodLog
+                    .filter { cal.isDate($0.date, inSameDayAs: day) }
+                    .reduce(0) { $0 + $1.vitaminDug }
+            default:
+                oral = store.profile.supplementOralUg
+            }
+            return ProjDay(uvDose: uvBsa.uv, oralDose: oral, bsa: uvBsa.bsa)
         }
     }
 
@@ -44,29 +53,6 @@ struct InsightsView: View {
         guard !projWindowDays.isEmpty else { return 0 }
         return projWindowDays.map { $0.uvDose }.reduce(0,+) / Double(projWindowDays.count)
     }
-
-    var rawProjWindowDays: [ProjDay] {
-
-        let aggs =
-            store.rawStudyWindowAggregates(
-                days: projectionWindow
-            )
-
-        return aggs.map {
-            ProjDay(
-                uvDose: $0.uvDose,
-                oralDose: $0.oralDose,
-                bsa: $0.bsa
-            )
-        }
-    }
-
-    var rawWindowAvgSED: Double {
-        guard !rawProjWindowDays.isEmpty else { return 0 }
-        return rawProjWindowDays.map { $0.uvDose }
-            .reduce(0,+) / Double(rawProjWindowDays.count)
-    }
-
     var windowAvgBSA:  Double {
         guard !projWindowDays.isEmpty else { return 0 }
         return projWindowDays.map { $0.bsa }.reduce(0,+) / Double(projWindowDays.count)
@@ -86,7 +72,7 @@ struct InsightsView: View {
     var projectedCorrected: [Double] {
         guard !projWindowDays.isEmpty else { return [] }
         let C0 = observedCorrected.last ?? store.profile.initialLevel
-        let n = max(1, 90 - projectionWindow)
+        let n  = max(1, 90 - observedCorrected.count)
         return VitaminDEngine.runModel(
             oralDoses: Array(repeating: windowAvgOral, count: n),
             uvDoses:   Array(repeating: windowAvgSED,  count: n),
@@ -94,9 +80,12 @@ struct InsightsView: View {
             age: store.profile.age, skinType: store.profile.skinType, C0: C0)
     }
     var projectedRaw: [Double] {
-        return store.rawAutoProjection(
-            windowDays: projectionWindow
-        )
+        guard !projWindowDays.isEmpty else { return [] }
+        let rawActuals = store.rawLongitudinalModel(daysBack: daysToShow)
+        let C0 = rawActuals.last?.total ?? store.profile.initialLevel
+        let n  = max(1, 90 - rawActuals.count)
+        return store.rawAutoProjection(windowDays: projectionWindow,
+                                       C0override: C0, nDays: n)
     }
     var projectionsHaveDiff: Bool {
         let maxDiff = zip(projectedCorrected, projectedRaw)
@@ -106,24 +95,13 @@ struct InsightsView: View {
 
     // ── Milestones ────────────────────────────────────────────
     var daysToEscapeDeficiency: Int? {
-    projectedCorrected.firstIndex { $0 >= 30 }.map { $0 + 1 }
+        projectedCorrected.firstIndex { $0 >= 30 }.map { $0 + 1 }
     }
-
     var daysToSufficiency: Int? {
         projectedCorrected.firstIndex { $0 >= 50 }.map { $0 + 1 }
     }
-
     var projectionEndDate: Date {
-        guard let start =
-            store.profile.studyStartDate
-        else {
-            return Date()
-        }
-        return Calendar.current.date(
-            byAdding: .day,
-            value: 89,
-            to: start
-        ) ?? start
+        Calendar.current.date(byAdding: .day, value: 89, to: Date()) ?? Date()
     }
 
     // ── Projection section ────────────────────────────────────
@@ -137,7 +115,7 @@ struct InsightsView: View {
                 Text("Average over most recent:")
                     .font(.caption).foregroundColor(.secondary)
                 HStack(spacing: 8) {
-                    ForEach([7, 14, 30], id: \.self) { days in
+                    ForEach([7, 14, 21, 30], id: \.self) { days in
                         ProjectionWindowButton(
                             days: days,
                             selected: projectionWindow == days
@@ -149,9 +127,7 @@ struct InsightsView: View {
                 }
             }.padding(.horizontal)
 
-            ProjectionC0Row(
-                level: store.profile.initialLevel
-            )
+            ProjectionC0Row(level: store.profile.initialLevel)
 
             if projectedCorrected.isEmpty {
                 Text("Track at least one day to generate a projection.")
@@ -436,6 +412,18 @@ struct ProjectionChart: View {
                 Text("50").font(.system(size:7)).foregroundColor(.green).offset(x:2,y:y50-8)
                 Rectangle().fill(Color.red.opacity(0.35)).frame(height:1).offset(y:y30)
                 Text("30").font(.system(size:7)).foregroundColor(.red).offset(x:2,y:y30-8)
+
+                // Y-axis labels — evenly spaced from minVal to maxVal
+                let yStep: Double = (maxVal - minVal) <= 20 ? 5 : 10
+                ForEach(Array(stride(from: minVal, through: maxVal, by: yStep)), id: \.self) { val in
+                    let yy = yPos(val, h: h)
+                    if yy >= 0 && yy <= h {
+                        Text(String(format: "%.0f", val))
+                            .font(.system(size: 7))
+                            .foregroundColor(.secondary)
+                            .position(x: w - 16, y: yy)
+                    }
+                }
 
                 if observed.count > 0 && projected.count > 0 {
                     let divX = xPos(observed.count-1, w:w)
