@@ -196,6 +196,7 @@ struct ProfileView: View {
 
                     Button("Recover readings + food log from CSV") {
                         store.recoverReadingsFromCSV()
+                        store.recoverFoodLogFromCSV()
                     }.foregroundColor(.blue)
                     Button("Clear today's readings") {
                         store.clearToday()

@@ -4,7 +4,7 @@ import SwiftUI
 struct InsightsView: View {
     @EnvironmentObject var store: DataStore
     @State var selectedRange     = 0
-    @State var projectionWindow: Int = 14
+    @State var projectionWindow: Int = 7
     let ranges = ["7 days", "14 days", "30 days"]
 
     var daysToShow: Int {
@@ -44,6 +44,29 @@ struct InsightsView: View {
         guard !projWindowDays.isEmpty else { return 0 }
         return projWindowDays.map { $0.uvDose }.reduce(0,+) / Double(projWindowDays.count)
     }
+
+    var rawProjWindowDays: [ProjDay] {
+
+        let aggs =
+            store.rawStudyWindowAggregates(
+                days: projectionWindow
+            )
+
+        return aggs.map {
+            ProjDay(
+                uvDose: $0.uvDose,
+                oralDose: $0.oralDose,
+                bsa: $0.bsa
+            )
+        }
+    }
+
+    var rawWindowAvgSED: Double {
+        guard !rawProjWindowDays.isEmpty else { return 0 }
+        return rawProjWindowDays.map { $0.uvDose }
+            .reduce(0,+) / Double(rawProjWindowDays.count)
+    }
+
     var windowAvgBSA:  Double {
         guard !projWindowDays.isEmpty else { return 0 }
         return projWindowDays.map { $0.bsa }.reduce(0,+) / Double(projWindowDays.count)
@@ -71,11 +94,9 @@ struct InsightsView: View {
             age: store.profile.age, skinType: store.profile.skinType, C0: C0)
     }
     var projectedRaw: [Double] {
-    guard !projWindowDays.isEmpty else { return [] }
-
-    return store.rawAutoProjection(
-        windowDays: projectionWindow
-    )
+        return store.rawAutoProjection(
+            windowDays: projectionWindow
+        )
     }
     var projectionsHaveDiff: Bool {
         let maxDiff = zip(projectedCorrected, projectedRaw)
@@ -85,13 +106,24 @@ struct InsightsView: View {
 
     // ── Milestones ────────────────────────────────────────────
     var daysToEscapeDeficiency: Int? {
-        projectedCorrected.firstIndex { $0 >= 30 }.map { projectionWindow + $0 + 1 }
+    projectedCorrected.firstIndex { $0 >= 30 }.map { $0 + 1 }
     }
+
     var daysToSufficiency: Int? {
-        projectedCorrected.firstIndex { $0 >= 50 }.map { projectionWindow + $0 + 1 }
+        projectedCorrected.firstIndex { $0 >= 50 }.map { $0 + 1 }
     }
+
     var projectionEndDate: Date {
-        Calendar.current.date(byAdding: .day, value: 89, to: Date()) ?? Date()
+        guard let start =
+            store.profile.studyStartDate
+        else {
+            return Date()
+        }
+        return Calendar.current.date(
+            byAdding: .day,
+            value: 89,
+            to: start
+        ) ?? start
     }
 
     // ── Projection section ────────────────────────────────────
@@ -105,7 +137,7 @@ struct InsightsView: View {
                 Text("Average over most recent:")
                     .font(.caption).foregroundColor(.secondary)
                 HStack(spacing: 8) {
-                    ForEach([7, 14, 21, 30], id: \.self) { days in
+                    ForEach([7, 14, 30], id: \.self) { days in
                         ProjectionWindowButton(
                             days: days,
                             selected: projectionWindow == days
@@ -118,8 +150,7 @@ struct InsightsView: View {
             }.padding(.horizontal)
 
             ProjectionC0Row(
-                level: observedCorrected.last
-                    ?? store.profile.initialLevel
+                level: store.profile.initialLevel
             )
 
             if projectedCorrected.isEmpty {
