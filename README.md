@@ -8,8 +8,8 @@ An iOS app that tracks UV exposure and models serum vitamin D (25(OH)D) levels u
 
 - **Xcode** 15 or later
 - **iOS** 16.0+ deployment target (SwiftUI features used throughout)
-- **Physical iPhone** strongly recommended - background location and CoreMotion don't work meaningfully in the Simulator
-- No external Swift packages or CocoaPods - all dependencies are system frameworks
+- **Physical iPhone** strongly recommended (background location and CoreMotion don't work meaningfully in the Simulator)
+- No external Swift packages or CocoaPods; all dependencies are system frameworks
 
 ---
 
@@ -59,7 +59,7 @@ This matches the `UIBackgroundModes` key in `Info.plist` and is required for the
 
 1. Connect your iPhone and select it as the build target.
 2. Press **Cmd+R** to build and run.
-3. On first launch, iOS will prompt for **location permission** - choose **Always Allow** for background tracking to function.
+3. On first launch, iOS will prompt for **location permission**. Choose **Always Allow** for background tracking to function.
 4. The onboarding flow will collect:
    - Skin type (I–II or III–VI)
    - Age
@@ -112,10 +112,10 @@ LocationManager (CoreLocation, ~50m filter)
 The app implements the **Diffey two-compartment pharmacokinetic model**. Each 5-minute reading contributes a SED slice (`VitaminDEngine.uviToSED`). Daily aggregates are fed into `VitaminDEngine.runModel`, which uses the response functions `R_UV(t)` and `R_oral(t)` (biexponential decay) to produce a running plasma 25(OH)D estimate in nmol/L.
 
 Personalisation factors:
-- `ageFactor` - linear decline from age 20 (Eq. 10)
-- `skinType.factor` - 1.0 for Type I–II, 1/1.35 for Type III–VI (Eq. 9)
-- `ClothingOption.bsaPercent` - Lund-Browder body surface area fractions
-- `C0` - user-supplied baseline serum level
+- `ageFactor`: linear decline from age 20 (Eq. 10)
+- `skinType.factor`: 1.0 for Type I–II, 1/1.35 for Type III–VI (Eq. 9)
+- `ClothingOption.bsaPercent`: Lund-Browder body surface area fractions
+- `C0`: user-supplied baseline serum level
 
 ---
 
@@ -167,5 +167,5 @@ Configured in **Profile → Oral vitamin D source**:
 - **Always Allow location** is required for background tracking. If you only grant "While Using", readings stop when the app is backgrounded.
 - The indoor detector requires GPS accuracy < 25 m to return `true`. In poor-signal environments it defaults to outdoors.
 - Use **Profile → Study start date** to exclude historical readings from model calculations without deleting them.
-- The **corrections.csv** file is useful for evaluating indoor detection accuracy - it records every manual override alongside the auto-detected value.
+- The **corrections.csv** file is useful for evaluating indoor detection accuracy; it records every manual override alongside the auto-detected value.
 - If `UserDefaults` is cleared by the OS, **Profile → Recover readings from CSV** can restore readings from the existing CSV files.
